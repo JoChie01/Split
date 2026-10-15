@@ -4,7 +4,14 @@
  * WHAT: Automated checks for split.ts. Run them with `npm test`.
  */
 import { describe, it, expect } from "vitest";
-import { splitEqual, splitByAmounts, splitByPercent, type Shares } from "./split";
+import {
+  splitEqual,
+  splitByAmounts,
+  splitByPercent,
+  splitByItems,
+  type Item,
+  type Shares,
+} from "./split";
 
 const sum = (shares: Shares) => Object.values(shares).reduce((a, b) => a + b, 0);
 
@@ -156,7 +163,7 @@ describe("splitByPercent (basis points: 100% = 10000)", () => {
   });
 
   it("always adds up exactly to the total", () => {
-    const plans = [
+    const plans: Shares[] = [
       { a: 3333, b: 3333, c: 3334 },
       { a: 10000 },
       { a: 1, b: 9999 },
@@ -181,5 +188,93 @@ describe("splitByPercent (basis points: 100% = 10000)", () => {
     expect(() => splitByPercent(10000, { ana: 5000.5, ben: 4999.5 }, "ana")).toThrow();
     expect(() => splitByPercent(10000, { ana: 11000, ben: -1000 }, "ana")).toThrow();
     expect(() => splitByPercent(-100, { ana: 10000 }, "ana")).toThrow();
+  });
+});
+
+describe("splitByItems", () => {
+  it("splits a receipt where some items are shared (pasta, steak, drinks)", () => {
+    const items: Item[] = [
+      { price: 20000, sharedBy: ["ana"] },
+      { price: 35000, sharedBy: ["ben"] },
+      { price: 15000, sharedBy: ["ana", "ben"] },
+    ];
+    expect(splitByItems(items, 0, "ana")).toEqual({
+      total: 70000,
+      shares: { ana: 27500, ben: 42500 },
+    });
+  });
+
+  it("gives leftover centavos inside a shared item to the payer", () => {
+    const result = splitByItems([{ price: 10000, sharedBy: ["a", "b", "c"] }], 0, "a");
+    expect(result.shares).toEqual({ a: 3334, b: 3333, c: 3333 });
+  });
+
+  it("shares tax and service charge in proportion to what each person ordered", () => {
+    const items: Item[] = [
+      { price: 10000, sharedBy: ["a"] },
+      { price: 30000, sharedBy: ["b"] },
+    ];
+    // 4000 extra is 10% of the 40000 items: a pays 1000 of it, b pays 3000
+    expect(splitByItems(items, 4000, "a")).toEqual({
+      total: 44000,
+      shares: { a: 11000, b: 33000 },
+    });
+  });
+
+  it("gives leftover centavos from the extra charge to the payer", () => {
+    const items: Item[] = [
+      { price: 10000, sharedBy: ["a"] },
+      { price: 10000, sharedBy: ["b"] },
+      { price: 10000, sharedBy: ["c"] },
+    ];
+    // ₱1.00 extra over 3 people: 33 each, 1 centavo left for the payer (b)
+    expect(splitByItems(items, 100, "b")).toEqual({
+      total: 30100,
+      shares: { a: 10033, b: 10034, c: 10033 },
+    });
+  });
+
+  it("lists the payer only when they owe something", () => {
+    const result = splitByItems([{ price: 10001, sharedBy: ["b", "c"] }], 0, "a");
+    expect(result.shares).toEqual({ b: 5000, c: 5000, a: 1 });
+  });
+
+  it("always adds up exactly (500 random receipts, same ones every run)", () => {
+    // Park-Miller generator: "random" numbers that repeat each run, so a failure is reproducible.
+    let seed = 12345;
+    const rand = (n: number) => {
+      seed = (seed * 48271) % 2147483647;
+      return seed % n;
+    };
+    const people = ["a", "b", "c", "d"];
+
+    for (let run = 0; run < 500; run++) {
+      const items: Item[] = [];
+      let expected = 0;
+      const count = rand(5) + 1;
+      for (let i = 0; i < count; i++) {
+        const price = rand(100000) + 1;
+        const mask = rand(15) + 1; // which of the 4 people shared it (never nobody)
+        items.push({ price, sharedBy: people.filter((_, j) => (mask >> j) & 1) });
+        expected += price;
+      }
+      const extras = rand(10000);
+      expected += extras;
+
+      const result = splitByItems(items, extras, people[rand(4)] as string);
+      expect(result.total).toBe(expected);
+      expect(sum(result.shares)).toBe(result.total);
+    }
+  });
+
+  it("rejects bad input", () => {
+    expect(() => splitByItems([], 0, "a")).toThrow();
+    expect(() => splitByItems([{ price: 100, sharedBy: [] }], 0, "a")).toThrow();
+    expect(() => splitByItems([{ price: 100, sharedBy: ["a", "a"] }], 0, "a")).toThrow();
+    expect(() => splitByItems([{ price: 100.5, sharedBy: ["a"] }], 0, "a")).toThrow();
+    expect(() => splitByItems([{ price: 100, sharedBy: ["a"] }], -1, "a")).toThrow();
+    expect(() => splitByItems([{ price: 100, sharedBy: ["a"] }], 10.5, "a")).toThrow();
+    // extra charge, but nothing to share it by
+    expect(() => splitByItems([{ price: 0, sharedBy: ["a"] }], 500, "a")).toThrow();
   });
 });
