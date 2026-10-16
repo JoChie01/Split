@@ -1,8 +1,16 @@
 /**
- * Money in Split is ALWAYS a whole number of centavos (₱19.99 -> 1999).
- * We never store or calculate with pesos as decimals, because floats
- * cannot represent most decimal fractions exactly.
+ * money.ts
+ *
+ * WHAT: Helpers for reading and showing peso amounts.
+ * RULE: All money in Split is whole centavos (₱19.99 = 1999). Never decimals.
+ *
+ * parsePeso   -> typed text ("1,250.50") into centavos
+ * formatPeso  -> centavos into display text ("₱1,250.50")
+ * assertCentavos / assertInteger -> guards that reject bad numbers
+ *
+ * USED BY: split.ts and balances.ts (coming next)
  */
+
 export type Centavos = number;
 
 /** Throws unless n is a whole number we can safely do math on. Negatives are allowed (balances). */
@@ -41,3 +49,5 @@ export function formatPeso(centavos: Centavos): string {
   const cents = String(abs % 100).padStart(2, "0");
   return `${sign}₱${pesos.toLocaleString("en-US")}.${cents}`;
 }
+
+///** 
