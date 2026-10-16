@@ -1,3 +1,10 @@
+/**
+ * money.test.ts
+ *
+ * WHAT: Automated checks for money.ts. Run them with `npm test`.
+ * WHY: If someone changes money.ts and breaks it, a test here turns red.
+ */
+
 import { describe, it, expect } from "vitest";
 import { parsePeso, formatPeso, assertCentavos } from "./money";
 
