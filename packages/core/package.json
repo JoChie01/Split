@@ -1,16 +1,14 @@
 {
-  "name": "core",
+  "name": "@split/core",
   "version": "1.0.0",
-  "description": "",
   "private": true,
   "type": "module",
+  "description": "Pure money, split and settle-up logic for Split (PHP, integer centavos).",
+  "exports": "./src/index.ts",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
     "typescript": "^7.0.2",
     "vitest": "^5.0.4"
