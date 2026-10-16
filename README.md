@@ -8,7 +8,7 @@ Log a bill, split it equally, by amount, by percentage or by item, then collect 
 
 ## Milestones
 
-- [ ] 1. Split and settle-up functions with unit tests
+- [x] 1. Split and settle-up functions with unit tests
 - [ ] 2. Backend and database
 - [ ] 3. UI for groups, expenses and balances
 - [ ] 4. Payment proof and confirm/reject flow
