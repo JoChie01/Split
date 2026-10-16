@@ -7,12 +7,26 @@
  */
 import Fastify from "fastify";
 import { formatPeso } from "@split/core";
+import type { Sql } from "./db";
 
-export function buildApp(options: { logger?: boolean } = {}) {
+export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
   const app = Fastify({ logger: options.logger ?? false });
+  const { sql } = options;
 
   // A simple "is the server alive?" check. The sample proves the API can use @split/core.
   app.get("/health", async () => ({ status: "ok", sample: formatPeso(123456) }));
+
+  // "Can the server reach the database?" check.
+  app.get("/health/db", async (_request, reply) => {
+    if (!sql) return reply.code(503).send({ status: "no database configured" });
+    try {
+      await sql`select 1`;
+      return { status: "ok" };
+    } catch (err) {
+      app.log.error(err);
+      return reply.code(503).send({ status: "database unreachable" });
+    }
+  });
 
   return app;
 }
