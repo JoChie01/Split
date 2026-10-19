@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-   "scripts": {
+  "scripts": {
     "dev": "tsx watch --env-file=.env src/server.ts",
     "start": "tsx --env-file=.env src/server.ts",
     "migrate": "tsx --env-file=.env src/migrate-cli.ts",
@@ -13,7 +13,8 @@
   "dependencies": {
     "@split/core": "*",
     "fastify": "^5.12.7",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
