@@ -8,7 +8,7 @@
 import postgres from "postgres";
 
 export function createSql(url: string) {
-  return postgres(url);
+  return postgres(url, { onnotice: () => {} }); // ignore harmless database notices
 }
 
 export type Sql = ReturnType<typeof createSql>;

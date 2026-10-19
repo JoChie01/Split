@@ -8,6 +8,7 @@
 import Fastify from "fastify";
 import { formatPeso } from "@split/core";
 import type { Sql } from "./db";
+import { registerGroupRoutes } from "./routes/groups";
 
 export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
   const app = Fastify({ logger: options.logger ?? false });
@@ -27,6 +28,8 @@ export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
       return reply.code(503).send({ status: "database unreachable" });
     }
   });
+
+  if (sql) registerGroupRoutes(app, sql);
 
   return app;
 }
