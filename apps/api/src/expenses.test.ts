@@ -225,3 +225,99 @@ describe("GET /groups/:groupId/expenses", () => {
     expect(res.json().map((e: { title: string }) => e.title)).toEqual(["Second", "First"]);
   });
 });
+
+describe("items split", () => {
+  it("splits by what each person ordered, and shares the extras by their food total", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+
+    // Pasta 200 (Ana), steak 350 (Ben), pitcher 150 (Ana and Ben), extras 0.
+    // Ana: 200 + 75 = 275. Ben: 350 + 75 = 425.
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Dinner",
+        paidByMemberId: carl,
+        totalCentavos: 70000,
+        splitMode: "items",
+        extrasCentavos: 0,
+        items: [
+          { name: "Pasta", priceCentavos: 20000, sharedByMemberIds: [ana] },
+          { name: "Steak", priceCentavos: 35000, sharedByMemberIds: [ben] },
+          { name: "Pitcher", priceCentavos: 15000, sharedByMemberIds: [ana, ben] },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().shares).toEqual({ [ana]: 27500, [ben]: 42500 });
+  });
+
+    it("shares tax and service charge in proportion to each person's food", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+
+    // Food: Ana 200, Ben 350 (total 550). Extras 55 shared 200:350,
+    // so Ana pays 20 of it and Ben pays 35. Totals: Ana 220, Ben 385.
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Dinner",
+        paidByMemberId: carl,
+        totalCentavos: 60500,
+        splitMode: "items",
+        extrasCentavos: 5500,
+        items: [
+          { name: "Pasta", priceCentavos: 20000, sharedByMemberIds: [ana] },
+          { name: "Steak", priceCentavos: 35000, sharedByMemberIds: [ben] },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const shares = res.json().shares as Record<string, number>;
+    expect(shares[ana]).toBe(22000);
+    expect(shares[ben]).toBe(38500);
+    expect(Object.values(shares).reduce((a, b) => a + b)).toBe(60500);
+  });
+
+  it("saves the items so they can be read back", async () => {
+    const { groupId, ana, ben } = await setupGroup();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Lunch",
+        paidByMemberId: ana,
+        totalCentavos: 20000,
+        splitMode: "items",
+        extrasCentavos: 0,
+        items: [{ name: "Adobo", priceCentavos: 20000, sharedByMemberIds: [ana, ben] }],
+      },
+    });
+
+    const rows = await sql<{ name: string; price_centavos: number }[]>`
+      select name, price_centavos from expense_items where expense_id = ${res.json().id}`;
+    expect(rows).toEqual([{ name: "Adobo", price_centavos: 20000 }]);
+  });
+
+  it("answers 422 when items and extras don't add up to the total", async () => {
+    const { groupId, ana, ben } = await setupGroup();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Lunch",
+        paidByMemberId: ana,
+        totalCentavos: 99999,
+        splitMode: "items",
+        extrasCentavos: 0,
+        items: [{ name: "Adobo", priceCentavos: 20000, sharedByMemberIds: [ana, ben] }],
+      },
+    });
+
+    expect(res.statusCode).toBe(422);
+  });
+});
