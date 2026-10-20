@@ -10,6 +10,7 @@ import { formatPeso } from "@split/core";
 import type { Sql } from "./db";
 import { registerGroupRoutes } from "./routes/groups";
 import { registerExpenseRoutes } from "./routes/expenses";
+import { registerLinkRoutes } from "./routes/links";
 
 export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
   const app = Fastify({ logger: options.logger ?? false });
@@ -33,6 +34,7 @@ export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
   if (sql) {
     registerGroupRoutes(app, sql);
     registerExpenseRoutes(app, sql);
+    registerLinkRoutes(app, sql);
   }
 
   return app;
