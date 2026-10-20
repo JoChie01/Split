@@ -9,6 +9,7 @@ import Fastify from "fastify";
 import { formatPeso } from "@split/core";
 import type { Sql } from "./db";
 import { registerGroupRoutes } from "./routes/groups";
+import { registerExpenseRoutes } from "./routes/expenses";
 
 export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
   const app = Fastify({ logger: options.logger ?? false });
@@ -29,7 +30,10 @@ export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
     }
   });
 
-  if (sql) registerGroupRoutes(app, sql);
+  if (sql) {
+    registerGroupRoutes(app, sql);
+    registerExpenseRoutes(app, sql);
+  }
 
   return app;
 }
