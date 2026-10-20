@@ -7,7 +7,7 @@
  *   GET    /groups/:groupId/expenses/:expenseId                         one bill, with items and claims
  *   POST   /groups/:groupId/expenses/:expenseId/items/:itemId/claims    claim an item
  *   DELETE /groups/:groupId/expenses/:expenseId/items/:itemId/claims/:memberId   unclaim it
- *   POST   /groups/:groupId/expenses/:expenseId/confirm                 lock the bill
+ *   POST   /groups/:groupId/expenses/:expenseId/confirm                 lock the bill (payer)
  * RULES: Shares are always computed on the server with @split/core.
  *        Drafts can change. Confirmed bills cannot.
  */
@@ -90,6 +90,18 @@ type ExpenseRow = {
   extrasMode: string;
   createdAt: Date;
 };
+
+type ItemWithClaims = {
+  id: string;
+  name: string;
+  priceCentavos: number;
+  position: number;
+  claimedBy: string[];
+};
+
+export type ClaimResult =
+  | { ok: true; shares: Shares }
+  | { ok: false; code: number; error: string };
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : "Invalid split";
@@ -194,31 +206,82 @@ async function storedShares(sql: Sql, expenseId: string): Promise<Shares> {
   return Object.fromEntries(rows.map((row) => [row.memberId, row.amount]));
 }
 
-/** Rebuilds the shares of an item bill from its items and current claims. */
-async function recalculateItemShares(sql: Sql, expense: ExpenseRow): Promise<Shares> {
-  const items = await sql<{ id: string; priceCentavos: number }[]>`
-    select id, price_centavos as "priceCentavos"
-    from expense_items where expense_id = ${expense.id} order by position`;
+/** The items of a bill, each with the people who claimed it. */
+export async function loadItems(sql: Sql, expenseId: string): Promise<ItemWithClaims[]> {
+  const items = await sql<{ id: string; name: string; priceCentavos: number; position: number }[]>`
+    select id, name, price_centavos as "priceCentavos", position
+    from expense_items where expense_id = ${expenseId} order by position`;
   const claims = await sql<{ itemId: string; memberId: string }[]>`
     select c.item_id as "itemId", c.member_id as "memberId"
     from expense_item_sharers c
     join expense_items i on i.id = c.item_id
-    where i.expense_id = ${expense.id}`;
-
-  return shareItems(
-    items.map((item) => ({
-      price: item.priceCentavos,
-      sharedBy: claims.filter((c) => c.itemId === item.id).map((c) => c.memberId),
-    })),
-    expense.extrasCentavos,
-    expense.extrasMode,
-    expense.paidByMemberId,
-  );
+    where i.expense_id = ${expenseId}`;
+  return items.map((item) => ({
+    ...item,
+    claimedBy: claims.filter((c) => c.itemId === item.id).map((c) => c.memberId),
+  }));
 }
 
-/** Replaces the saved shares of a bill, all at once. */
-async function saveShares(sql: Sql, expenseId: string, shares: Shares): Promise<void> {
+/**
+ * Adds or removes one person's claim on one item, and updates the shares.
+ * Used by the group routes and by the link routes, so the rules live in one place.
+ */
+export async function changeClaim(
+  sql: Sql,
+  groupId: string,
+  expenseId: string,
+  itemId: string,
+  memberId: string,
+  claimed: boolean,
+): Promise<ClaimResult> {
+  const expense = await findExpense(sql, groupId, expenseId);
+  if (!expense) return { ok: false, code: 404, error: "Bill not found" };
+  if (expense.status !== "draft") {
+    return { ok: false, code: 409, error: "This bill is confirmed and can't change" };
+  }
+  if (expense.splitMode !== "items") {
+    return { ok: false, code: 409, error: "Only item bills can be claimed" };
+  }
+
+  const items = await loadItems(sql, expenseId);
+  if (!items.some((item) => item.id === itemId)) {
+    return { ok: false, code: 404, error: "Item not found" };
+  }
+  if (claimed && !(await allInGroup(sql, groupId, new Set([memberId])))) {
+    return { ok: false, code: 404, error: "That person is not in this group" };
+  }
+
+  // Work out the new shares first, so a bad split is refused before anything is saved.
+  const updated = items.map((item) => {
+    if (item.id !== itemId) return item;
+    const others = item.claimedBy.filter((id) => id !== memberId);
+    return { ...item, claimedBy: claimed ? [...others, memberId] : others };
+  });
+
+  let shares: Shares;
+  try {
+    shares = shareItems(
+      updated.map((item) => ({ price: item.priceCentavos, sharedBy: item.claimedBy })),
+      expense.extrasCentavos,
+      expense.extrasMode,
+      expense.paidByMemberId,
+    );
+  } catch (err) {
+    return { ok: false, code: 422, error: errorText(err) };
+  }
+
+  // The claim and the new shares are saved together, or not at all.
   await sql.begin(async (tx) => {
+    if (claimed) {
+      await tx`
+        insert into expense_item_sharers (item_id, member_id)
+        values (${itemId}, ${memberId})
+        on conflict do nothing`;
+    } else {
+      await tx`
+        delete from expense_item_sharers
+        where item_id = ${itemId} and member_id = ${memberId}`;
+    }
     await tx`delete from expense_shares where expense_id = ${expenseId}`;
     for (const [payee, amount] of Object.entries(shares)) {
       if (amount === 0) continue;
@@ -227,25 +290,8 @@ async function saveShares(sql: Sql, expenseId: string, shares: Shares): Promise<
         values (${expenseId}, ${payee}, ${amount})`;
     }
   });
-}
 
-type ClaimCheck =
-  | { ok: true; expense: ExpenseRow }
-  | { ok: false; code: number; message: string };
-
-/** Can someone claim or unclaim this item right now? */
-async function checkClaimable(sql: Sql, groupId: string, expenseId: string, itemId: string): Promise<ClaimCheck> {
-  const expense = await findExpense(sql, groupId, expenseId);
-  if (!expense) return { ok: false, code: 404, message: "Bill not found" };
-  if (expense.status !== "draft") {
-    return { ok: false, code: 409, message: "This bill is confirmed and can't change" };
-  }
-  if (expense.splitMode !== "items") {
-    return { ok: false, code: 409, message: "Only item bills can be claimed" };
-  }
-  const [item] = await sql`select 1 from expense_items where id = ${itemId} and expense_id = ${expenseId}`;
-  if (!item) return { ok: false, code: 404, message: "Item not found" };
-  return { ok: true, expense };
+  return { ok: true, shares: await storedShares(sql, expenseId) };
 }
 
 export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
@@ -348,21 +394,9 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     const expense = await findExpense(sql, groupId, expenseId);
     if (!expense) return reply.code(404).send({ error: "Bill not found" });
 
-    const items = await sql<{ id: string; name: string; priceCentavos: number; position: number }[]>`
-      select id, name, price_centavos as "priceCentavos", position
-      from expense_items where expense_id = ${expenseId} order by position`;
-    const claims = await sql<{ itemId: string; memberId: string }[]>`
-      select c.item_id as "itemId", c.member_id as "memberId"
-      from expense_item_sharers c
-      join expense_items i on i.id = c.item_id
-      where i.expense_id = ${expenseId}`;
-
     return {
       ...expense,
-      items: items.map((item) => ({
-        ...item,
-        claimedBy: claims.filter((c) => c.itemId === item.id).map((c) => c.memberId),
-      })),
+      items: await loadItems(sql, expenseId),
       shares: await storedShares(sql, expenseId),
     };
   });
@@ -372,27 +406,10 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     const body = claimBody.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "Invalid claim" });
     const { groupId, expenseId, itemId } = params.data;
-    const claimer = body.data.memberId;
 
-    const check = await checkClaimable(sql, groupId, expenseId, itemId);
-    if (!check.ok) return reply.code(check.code).send({ error: check.message });
-
-    if (!(await allInGroup(sql, groupId, new Set([claimer])))) {
-      return reply.code(404).send({ error: "That person is not in this group" });
-    }
-
-    await sql`
-      insert into expense_item_sharers (item_id, member_id)
-      values (${itemId}, ${claimer})
-      on conflict do nothing`;
-
-    try {
-      const shares = recalculateItemShares(sql, check.expense);
-      await saveShares(sql, expenseId, await shares);
-      return { shares: await storedShares(sql, expenseId) };
-    } catch (err) {
-      return reply.code(422).send({ error: errorText(err) });
-    }
+    const result = await changeClaim(sql, groupId, expenseId, itemId, body.data.memberId, true);
+    if (!result.ok) return reply.code(result.code).send({ error: result.error });
+    return { shares: result.shares };
   });
 
   app.delete("/groups/:groupId/expenses/:expenseId/items/:itemId/claims/:memberId", async (request, reply) => {
@@ -400,20 +417,9 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid claim" });
     const { groupId, expenseId, itemId, memberId: claimer } = params.data;
 
-    const check = await checkClaimable(sql, groupId, expenseId, itemId);
-    if (!check.ok) return reply.code(check.code).send({ error: check.message });
-
-    await sql`
-      delete from expense_item_sharers
-      where item_id = ${itemId} and member_id = ${claimer}`;
-
-    try {
-      const shares = recalculateItemShares(sql, check.expense);
-      await saveShares(sql, expenseId, await shares);
-      return { shares: await storedShares(sql, expenseId) };
-    } catch (err) {
-      return reply.code(422).send({ error: errorText(err) });
-    }
+    const result = await changeClaim(sql, groupId, expenseId, itemId, claimer, false);
+    if (!result.ok) return reply.code(result.code).send({ error: result.error });
+    return { shares: result.shares };
   });
 
   app.post("/groups/:groupId/expenses/:expenseId/confirm", async (request, reply) => {
