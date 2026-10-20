@@ -321,3 +321,151 @@ describe("items split", () => {
     expect(res.statusCode).toBe(422);
   });
 });
+describe("drafts, claims and confirmation", () => {
+  /** Creates a draft item bill. Items start unclaimed unless you say otherwise. */
+  async function draftItemsBill(
+    groupId: string,
+    payer: string,
+    items: { name: string; priceCentavos: number; sharedByMemberIds?: string[] }[],
+    total: number,
+    extras = 0,
+    extrasMode = "proportional",
+  ) {
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Dinner",
+        paidByMemberId: payer,
+        totalCentavos: total,
+        splitMode: "items",
+        extrasCentavos: extras,
+        extrasMode,
+        items: items.map((item) => ({ sharedByMemberIds: [], ...item })),
+      },
+    });
+    return res.json() as { id: string; status: string; shares: Record<string, number> };
+  }
+
+  async function getBill(groupId: string, expenseId: string) {
+    const res = await app.inject({ method: "GET", url: `/groups/${groupId}/expenses/${expenseId}` });
+    return res.json() as {
+      status: string;
+      items: { id: string; name: string; claimedBy: string[] }[];
+      shares: Record<string, number>;
+    };
+  }
+
+  it("a new bill starts as a draft", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+    const bill = await draftItemsBill(groupId, carl, [{ name: "Pasta", priceCentavos: 20000 }], 20000);
+    expect(bill.status).toBe("draft");
+    expect(ana).toBeDefined();
+    expect(ben).toBeDefined();
+  });
+
+  it("claiming an item updates everyone's shares", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+    const bill = await draftItemsBill(
+      groupId,
+      carl,
+      [
+        { name: "Pasta", priceCentavos: 20000 },
+        { name: "Steak", priceCentavos: 35000 },
+      ],
+      55000,
+    );
+    const [pasta, steak] = (await getBill(groupId, bill.id)).items;
+
+    await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
+      payload: { memberId: ana },
+    });
+    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000 });
+
+    await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`,
+      payload: { memberId: ben },
+    });
+    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000, [ben]: 35000 });
+  });
+
+  it("refuses to confirm while an item has no one claiming it", async () => {
+    const { groupId, ana, carl } = await setupGroup();
+    const bill = await draftItemsBill(
+      groupId,
+      carl,
+      [
+        { name: "Pasta", priceCentavos: 20000 },
+        { name: "Steak", priceCentavos: 35000 },
+      ],
+      55000,
+    );
+    const [pasta] = (await getBill(groupId, bill.id)).items;
+    await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
+      payload: { memberId: ana },
+    });
+
+    const res = await app.inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().unclaimed).toEqual(["Steak"]);
+  });
+
+  it("confirms once everything is claimed, and then refuses changes", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+    const bill = await draftItemsBill(
+      groupId,
+      carl,
+      [
+        { name: "Pasta", priceCentavos: 20000 },
+        { name: "Steak", priceCentavos: 35000 },
+      ],
+      55000,
+    );
+    const [pasta, steak] = (await getBill(groupId, bill.id)).items;
+    await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
+      payload: { memberId: ana },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`,
+      payload: { memberId: ben },
+    });
+
+    const confirm = await app.inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
+    expect(confirm.statusCode).toBe(200);
+    expect(confirm.json().status).toBe("confirmed");
+
+    const change = await app.inject({
+      method: "DELETE",
+      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims/${ana}`,
+    });
+    expect(change.statusCode).toBe(409);
+  });
+
+  it("can split the service fee equally between the people who ate", async () => {
+    const { groupId, ana, ben, carl } = await setupGroup();
+
+    // Pasta 200 (Ana), steak 350 (Ben), fee 55 shared equally: 27.50 each.
+    const bill = await draftItemsBill(
+      groupId,
+      carl,
+      [
+        { name: "Pasta", priceCentavos: 20000, sharedByMemberIds: [ana] },
+        { name: "Steak", priceCentavos: 35000, sharedByMemberIds: [ben] },
+      ],
+      60500,
+      5500,
+      "equal",
+    );
+
+    expect(bill.shares).toEqual({ [ana]: 22750, [ben]: 37750 });
+  });
+});
