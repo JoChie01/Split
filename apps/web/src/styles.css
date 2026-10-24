@@ -1,0 +1,137 @@
+/*
+ * styles.css
+ *
+ * WHAT: The colours and layout for the whole app.
+ * HOW THEMES WORK: Colours are variables (tokens). The default is light.
+ *   If the phone is in dark mode, the dark values apply automatically.
+ *   Setting data-theme="dark" or data-theme="light" on <html> overrides that.
+ */
+
+:root {
+  --bg: #F5EFE3;
+  --fg: #111111;
+  --card: #FFFFFF;
+  --rule: #E6D9C0;
+  --muted: #55504A;
+  --btn-bg: #111111;
+  --btn-fg: #F5EFE3;
+  --hi-bg: #E6D9C0;
+  --hi-fg: #111111;
+  --mark-paper: #111111;
+  --mark-line: #F5EFE3;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111111;
+    --fg: #F5EFE3;
+    --card: #1C1B19;
+    --rule: #3A362E;
+    --muted: #B9B0A0;
+    --btn-bg: #F5EFE3;
+    --btn-fg: #111111;
+    --hi-bg: #E6D9C0;
+    --hi-fg: #111111;
+    --mark-paper: #F5EFE3;
+    --mark-line: #111111;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #111111;
+  --fg: #F5EFE3;
+  --card: #1C1B19;
+  --rule: #3A362E;
+  --muted: #B9B0A0;
+  --btn-bg: #F5EFE3;
+  --btn-fg: #111111;
+  --hi-bg: #E6D9C0;
+  --hi-fg: #111111;
+  --mark-paper: #F5EFE3;
+  --mark-line: #111111;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+a { color: inherit; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--hi-bg); outline-offset: 2px; }
+
+.page {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* Header */
+.top { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+.logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.mark { display: block; }
+.mark-paper { fill: var(--mark-paper); }
+.mark-line { fill: var(--mark-line); }
+.wordmark { font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 26px; letter-spacing: -0.03em; line-height: 1; }
+.login { font-weight: 600; font-size: 15px; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+
+/* Hero */
+h1 {
+  font-family: Outfit, Inter, sans-serif; font-weight: 700; font-size: 42px; line-height: 1.04;
+  letter-spacing: -0.03em; margin: 36px 0 0; text-wrap: balance;
+}
+h1 mark { background: var(--hi-bg); color: var(--hi-fg); padding: 0 6px; border-radius: 6px; }
+.lead { font-size: 17px; color: var(--muted); margin: 16px 0 0; }
+
+/* Receipt demo */
+.receipt { margin-top: 28px; background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 20px 18px; }
+.receipt-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.receipt hr { border: 0; border-top: 1px dashed var(--rule); margin: 14px 0; }
+.line {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  min-height: 52px; padding: 8px 12px; margin: 0 0 6px; border: 1.5px solid var(--rule); border-radius: 12px;
+  background: transparent; color: var(--fg); font: 600 16px Inter, system-ui, sans-serif; text-align: left; cursor: pointer;
+}
+.line[aria-pressed="true"] { background: var(--btn-bg); color: var(--btn-fg); border-color: var(--btn-bg); }
+.line-right { display: flex; align-items: center; gap: 10px; }
+.tap { font-size: 12px; font-weight: 500; opacity: 0.75; }
+.price { font-variant-numeric: tabular-nums; font-weight: 500; }
+.sum { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 4px; }
+.you-pay { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
+.you-pay .label { font-weight: 600; }
+.you-pay .amount {
+  font-family: Outfit, Inter, sans-serif; font-weight: 700; font-size: 34px; letter-spacing: -0.02em;
+  background: var(--hi-bg); color: var(--hi-fg); padding: 0 10px; border-radius: 10px; font-variant-numeric: tabular-nums;
+}
+.hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+/* Steps */
+.steps { margin-top: 40px; }
+.steps h2 { font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 22px; letter-spacing: -0.02em; margin: 0; }
+.steps ol { list-style: none; padding: 0; margin: 14px 0 0; }
+.steps li { display: grid; grid-template-columns: 36px 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--rule); }
+.steps li:last-child { border-bottom: 1px solid var(--rule); }
+.num {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--btn-bg); color: var(--btn-fg);
+  display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;
+}
+.steps strong { display: block; font-weight: 600; }
+.desc { display: block; color: var(--muted); font-size: 15px; margin-top: 2px; }
+
+/* Call to action and footer */
+.cta {
+  display: flex; align-items: center; justify-content: center; min-height: 56px; margin-top: 32px;
+  border-radius: 14px; background: var(--btn-bg); color: var(--btn-fg); font-weight: 600; font-size: 17px; text-decoration: none;
+}
+.fine { text-align: center; font-size: 14px; color: var(--muted); margin: 14px 0 0; }
+.foot { margin-top: 40px; text-align: center; font-size: 13px; color: var(--muted); }
