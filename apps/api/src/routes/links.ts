@@ -1,31 +1,40 @@
 /**
  * routes/links.ts
  *
- * WHAT: Shareable links so people can claim their own items without an account.
- *   POST /groups/:groupId/links                                             make a link (7 days)
- *   GET  /join/:token                                                       group, members and bills
- *   POST /join/:token/expenses/:expenseId/items/:itemId/claims              claim an item
- *   DELETE /join/:token/expenses/:expenseId/items/:itemId/claims/:memberId  unclaim it
- * RULES: Links can claim, but never confirm. Only the payer confirms (group route).
- *        v1 TRUST: anyone with the link can claim as any member. Accounts come in milestone 5.
+ * WHAT: Shareable links that let a person join a group.
+ *   POST /groups/:groupId/links     make a link (members only, lasts 7 days)
+ *   GET  /join/:token               the group and its seats (you must be logged in)
+ *   POST /join/:token/join          take a seat, or add yourself as a new member (logged in)
+ * RULES: A link only lets someone JOIN. Joining means logging in and then choosing a seat
+ *        that no one has taken yet, or adding yourself. After that, you use the normal
+ *        group routes, which check your membership. Claims and confirmations never happen
+ *        through a link.
  *        Payment details are never shown on the join page.
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Sql } from "../db";
-import { changeClaim, loadItems } from "./expenses";
+import { accessIn } from "../access";
+import { currentUser } from "./auth";
 
 const LINK_DAYS = 7;
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 const tokenParams = z.object({ token: z.string().min(20).max(100) });
-const joinItemParams = tokenParams.extend({
-  expenseId: z.string().uuid(),
-  itemId: z.string().uuid(),
-});
-const joinClaimParams = joinItemParams.extend({ memberId: z.string().uuid() });
-const joinClaimBody = z.object({ memberId: z.string().uuid() });
+const joinBody = z.union([
+  z.object({ memberId: z.string().uuid() }),
+  z.object({ displayName: z.string().trim().min(1).max(60) }),
+]);
+
+const UNIQUE_VIOLATION = "23505";
+
+function pgCode(err: unknown): string | undefined {
+  if (typeof err === "object" && err !== null && "code" in err && typeof err.code === "string") {
+    return err.code;
+  }
+  return undefined;
+}
 
 /** We store only the hash, so the link itself exists only in the person's hands. */
 export function hashToken(token: string): string {
@@ -46,8 +55,8 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid group id" });
     const { groupId } = params.data;
 
-    const [group] = await sql`select 1 from groups where id = ${groupId}`;
-    if (!group) return reply.code(404).send({ error: "Group not found" });
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
 
     const token = randomBytes(32).toString("base64url");
     const [row] = await sql<{ expiresAt: Date }[]>`
@@ -65,58 +74,64 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
   app.get("/join/:token", async (request, reply) => {
     const params = tokenParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "Link not found or expired" });
+
+    const user = await currentUser(sql, request);
+    if (!user) return reply.code(401).send({ error: "Log in first" });
+
     const groupId = await groupForToken(sql, params.data.token);
     if (!groupId) return reply.code(404).send({ error: "Link not found or expired" });
 
     const [group] = await sql<{ id: string; name: string }[]>`
       select id, name from groups where id = ${groupId}`;
-    const members = await sql<{ id: string; displayName: string }[]>`
-      select id, display_name as "displayName"
+    // Each seat shows only whether it's taken, never who holds it.
+    const seats = await sql<{ id: string; displayName: string; taken: boolean }[]>`
+      select id, display_name as "displayName", (user_id is not null) as taken
       from members where group_id = ${groupId}
       order by lower(display_name)`;
-    const bills = await sql<
-      { id: string; title: string; status: string; totalCentavos: number; splitMode: string }[]
-    >`
-      select id, title, status,
-             total_centavos as "totalCentavos",
-             split_mode     as "splitMode"
-      from expenses where group_id = ${groupId}
-      order by created_at desc, id desc`;
 
-    return {
-      group,
-      members,
-      expenses: await Promise.all(
-        bills.map(async (bill) => ({
-          ...bill,
-          items: bill.splitMode === "items" ? await loadItems(sql, bill.id) : [],
-        })),
-      ),
-    };
+    const [mine] = await sql<{ id: string }[]>`
+      select id from members where group_id = ${groupId} and user_id = ${user.id}`;
+
+    return { group, seats, alreadyMember: !!mine };
   });
 
-  app.post("/join/:token/expenses/:expenseId/items/:itemId/claims", async (request, reply) => {
-    const params = joinItemParams.safeParse(request.params);
-    const body = joinClaimBody.safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "Invalid claim" });
+  app.post("/join/:token/join", async (request, reply) => {
+    const params = tokenParams.safeParse(request.params);
+    if (!params.success) return reply.code(404).send({ error: "Link not found or expired" });
+
+    const user = await currentUser(sql, request);
+    if (!user) return reply.code(401).send({ error: "Log in first" });
+
+    const body = joinBody.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Pick your name, or type a new one" });
+
     const groupId = await groupForToken(sql, params.data.token);
     if (!groupId) return reply.code(404).send({ error: "Link not found or expired" });
 
-    const { expenseId, itemId } = params.data;
-    const result = await changeClaim(sql, groupId, expenseId, itemId, body.data.memberId, true);
-    if (!result.ok) return reply.code(result.code).send({ error: result.error });
-    return { shares: result.shares };
-  });
+    const [mine] = await sql<{ id: string }[]>`
+      select id from members where group_id = ${groupId} and user_id = ${user.id}`;
+    if (mine) return reply.code(409).send({ error: "You're already in this group" });
 
-  app.delete("/join/:token/expenses/:expenseId/items/:itemId/claims/:memberId", async (request, reply) => {
-    const params = joinClaimParams.safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "Invalid claim" });
-    const groupId = await groupForToken(sql, params.data.token);
-    if (!groupId) return reply.code(404).send({ error: "Link not found or expired" });
+    try {
+      if ("memberId" in body.data) {
+        // Take the seat only if nobody has it yet. One statement, so two people can't both win it.
+        const [taken] = await sql<{ id: string }[]>`
+          update members set user_id = ${user.id}
+          where id = ${body.data.memberId} and group_id = ${groupId} and user_id is null
+          returning id`;
+        if (!taken) return reply.code(409).send({ error: "That name is already taken" });
+      } else {
+        await sql`
+          insert into members (group_id, display_name, user_id)
+          values (${groupId}, ${body.data.displayName}, ${user.id})`;
+      }
+    } catch (err) {
+      if (pgCode(err) === UNIQUE_VIOLATION) {
+        return reply.code(409).send({ error: "That name is already in this group" });
+      }
+      throw err;
+    }
 
-    const { expenseId, itemId, memberId } = params.data;
-    const result = await changeClaim(sql, groupId, expenseId, itemId, memberId, false);
-    if (!result.ok) return reply.code(result.code).send({ error: result.error });
-    return { shares: result.shares };
+    return reply.code(201).send({ groupId });
   });
 }
