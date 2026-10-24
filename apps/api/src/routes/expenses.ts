@@ -1,13 +1,13 @@
 /**
  * routes/expenses.ts
  *
- * WHAT: Bills for a group, from draft to confirmed.
+ * WHAT: Bills for a group, from draft to confirmed. Members only.
  *   POST   /groups/:groupId/expenses                                    add a draft bill
  *   GET    /groups/:groupId/expenses                                    list bills
  *   GET    /groups/:groupId/expenses/:expenseId                         one bill, with items and claims
- *   POST   /groups/:groupId/expenses/:expenseId/items/:itemId/claims    claim an item
- *   DELETE /groups/:groupId/expenses/:expenseId/items/:itemId/claims/:memberId   unclaim it
- *   POST   /groups/:groupId/expenses/:expenseId/confirm                 lock the bill (payer)
+ *   POST   /groups/:groupId/expenses/:expenseId/items/:itemId/claims    claim an item (for yourself)
+ *   DELETE /groups/:groupId/expenses/:expenseId/items/:itemId/claims/:memberId   unclaim it (your own)
+ *   POST   /groups/:groupId/expenses/:expenseId/confirm                 lock the bill (payer only)
  * RULES: Shares are always computed on the server with @split/core.
  *        Drafts can change. Confirmed bills cannot.
  */
@@ -22,6 +22,7 @@ import {
   type Shares,
 } from "@split/core";
 import type { Sql } from "../db";
+import { accessIn } from "../access";
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 const expenseParams = groupParams.extend({ expenseId: z.string().uuid() });
@@ -224,7 +225,7 @@ export async function loadItems(sql: Sql, expenseId: string): Promise<ItemWithCl
 
 /**
  * Adds or removes one person's claim on one item, and updates the shares.
- * Used by the group routes and by the link routes, so the rules live in one place.
+ * The routes check who is asking; this function checks the bill rules.
  */
 export async function changeClaim(
   sql: Sql,
@@ -298,16 +299,18 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
   app.post("/groups/:groupId/expenses", async (request, reply) => {
     const params = groupParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "Invalid group id" });
+    const { groupId } = params.data;
+
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+
     const body = expenseBody.safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({ error: "Invalid expense", issues: body.error.issues });
     }
-    const { groupId } = params.data;
     const expense = body.data;
 
     if (!(await allInGroup(sql, groupId, peopleInvolved(expense)))) {
-      const [group] = await sql`select 1 from groups where id = ${groupId}`;
-      if (!group) return reply.code(404).send({ error: "Group not found" });
       return reply.code(404).send({ error: "Someone in this bill is not in this group" });
     }
 
@@ -369,8 +372,8 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid group id" });
     const { groupId } = params.data;
 
-    const [group] = await sql`select 1 from groups where id = ${groupId}`;
-    if (!group) return reply.code(404).send({ error: "Group not found" });
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
 
     return sql<ExpenseRow[]>`
       select id, title,
@@ -391,6 +394,9 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid id" });
     const { groupId, expenseId } = params.data;
 
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+
     const expense = await findExpense(sql, groupId, expenseId);
     if (!expense) return reply.code(404).send({ error: "Bill not found" });
 
@@ -407,7 +413,14 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success || !body.success) return reply.code(400).send({ error: "Invalid claim" });
     const { groupId, expenseId, itemId } = params.data;
 
-    const result = await changeClaim(sql, groupId, expenseId, itemId, body.data.memberId, true);
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+    // You can only claim items for yourself.
+    if (body.data.memberId !== who.memberId) {
+      return reply.code(403).send({ error: "You can only claim items for yourself" });
+    }
+
+    const result = await changeClaim(sql, groupId, expenseId, itemId, who.memberId, true);
     if (!result.ok) return reply.code(result.code).send({ error: result.error });
     return { shares: result.shares };
   });
@@ -417,7 +430,13 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid claim" });
     const { groupId, expenseId, itemId, memberId: claimer } = params.data;
 
-    const result = await changeClaim(sql, groupId, expenseId, itemId, claimer, false);
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+    if (claimer !== who.memberId) {
+      return reply.code(403).send({ error: "You can only remove your own claims" });
+    }
+
+    const result = await changeClaim(sql, groupId, expenseId, itemId, who.memberId, false);
     if (!result.ok) return reply.code(result.code).send({ error: result.error });
     return { shares: result.shares };
   });
@@ -427,8 +446,14 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     if (!params.success) return reply.code(400).send({ error: "Invalid id" });
     const { groupId, expenseId } = params.data;
 
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+
     const expense = await findExpense(sql, groupId, expenseId);
     if (!expense) return reply.code(404).send({ error: "Bill not found" });
+    if (expense.paidByMemberId !== who.memberId) {
+      return reply.code(403).send({ error: "Only the person who paid can confirm this bill" });
+    }
     if (expense.status !== "draft") {
       return reply.code(409).send({ error: "This bill is already confirmed" });
     }

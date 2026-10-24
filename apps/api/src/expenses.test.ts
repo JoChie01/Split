@@ -2,12 +2,15 @@
  * expenses.test.ts
  *
  * WHAT: Checks bills against the real "split_test" database.
- *       Each test starts from empty tables and makes its own group and people.
+ *       Each test starts from empty group tables. Requests are sent as a named person:
+ *       Carl (who creates the group and pays), Ana and Ben (who claim their own items).
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import type { InjectOptions } from "fastify";
 import { buildApp } from "./app";
 import { createSql } from "./db";
 import { runMigrations } from "./migrate";
+import { sessionCookie, takeSeat } from "./test-helpers";
 
 const testDatabaseUrl =
   process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/split_test";
@@ -17,6 +20,15 @@ const app = buildApp({ sql });
 
 const unknownId = "3f2b8c1e-9d4a-4b7e-8a1c-5d6e7f8091a2";
 
+let carlCookie = "";
+let anaCookie = "";
+let benCookie = "";
+
+/** Sends a request as the given person. Carl by default. */
+function inject(opts: InjectOptions, cookie = carlCookie) {
+  return app.inject({ ...opts, headers: { cookie } });
+}
+
 beforeAll(async () => {
   await runMigrations(sql);
   await app.ready();
@@ -24,6 +36,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await sql`truncate groups cascade`;
+  carlCookie = await sessionCookie(sql, "carl@example.com");
+  anaCookie = await sessionCookie(sql, "ana@example.com");
+  benCookie = await sessionCookie(sql, "ben@example.com");
 });
 
 afterAll(async () => {
@@ -31,20 +46,30 @@ afterAll(async () => {
   await sql.end();
 });
 
-/** A group with three people: Ana, Ben and Carl. */
+/**
+ * A group with three people: Carl (the creator, who pays), Ana and Ben.
+ * Ana and Ben each get their own login, so they can claim items for themselves.
+ */
 async function setupGroup() {
   const group = (
-    await app.inject({ method: "POST", url: "/groups", payload: { name: "Baguio Trip" } })
+    await inject({ method: "POST", url: "/groups", payload: { name: "Baguio Trip", yourName: "Carl" } })
   ).json() as { id: string };
 
-  const people: Record<string, string> = {};
-  for (const name of ["Ana", "Ben", "Carl"]) {
-    const res = await app.inject({
+  const details = (await inject({ method: "GET", url: `/groups/${group.id}` })).json() as {
+    members: { id: string; displayName: string; isYou: boolean }[];
+  };
+  const carl = details.members.find((m) => m.isYou)!.id;
+
+  const people: Record<string, string> = { Carl: carl };
+  for (const name of ["Ana", "Ben"]) {
+    const res = await inject({
       method: "POST",
       url: `/groups/${group.id}/members`,
       payload: { displayName: name },
     });
-    people[name] = (res.json() as { id: string }).id;
+    const id = (res.json() as { id: string }).id;
+    await takeSeat(sql, id, `${name.toLowerCase()}@example.com`);
+    people[name] = id;
   }
   return { groupId: group.id, ana: people.Ana!, ben: people.Ben!, carl: people.Carl! };
 }
@@ -54,7 +79,7 @@ describe("POST /groups/:groupId/expenses", () => {
     const { groupId, ana, ben, carl } = await setupGroup();
 
     // ₱100.00 split 3 ways is 3333.33 centavos each, so the payer takes the extra centavo.
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -75,7 +100,7 @@ describe("POST /groups/:groupId/expenses", () => {
   it("saves exact amounts", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -94,7 +119,7 @@ describe("POST /groups/:groupId/expenses", () => {
   it("splits by percent", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -113,7 +138,7 @@ describe("POST /groups/:groupId/expenses", () => {
   it("answers 422 when the amounts don't add up to the total", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -131,7 +156,7 @@ describe("POST /groups/:groupId/expenses", () => {
   it("answers 422 when percentages don't reach 100%", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -150,7 +175,7 @@ describe("POST /groups/:groupId/expenses", () => {
     const first = await setupGroup();
     const second = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${first.groupId}/expenses`,
       payload: {
@@ -165,10 +190,32 @@ describe("POST /groups/:groupId/expenses", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("refuses someone who is logged in but not a member of the group", async () => {
+    const { groupId, ana } = await setupGroup();
+    const danCookie = await sessionCookie(sql, "dan@example.com");
+
+    const res = await inject(
+      {
+        method: "POST",
+        url: `/groups/${groupId}/expenses`,
+        payload: {
+          title: "Dinner",
+          paidByMemberId: ana,
+          totalCentavos: 10000,
+          splitMode: "equal",
+          participantIds: [ana],
+        },
+      },
+      danCookie,
+    );
+
+    expect(res.statusCode).toBe(404);
+  });
+
   it("refuses a bill with a decimal or zero amount", async () => {
     const { groupId, ana } = await setupGroup();
     const post = (totalCentavos: unknown) =>
-      app.inject({
+      inject({
         method: "POST",
         url: `/groups/${groupId}/expenses`,
         payload: {
@@ -185,7 +232,7 @@ describe("POST /groups/:groupId/expenses", () => {
   });
 
   it("answers 404 for a group that does not exist", async () => {
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${unknownId}/expenses`,
       payload: {
@@ -199,13 +246,31 @@ describe("POST /groups/:groupId/expenses", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("answers 401 when nobody is logged in", async () => {
+    const { groupId, ana } = await setupGroup();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/groups/${groupId}/expenses`,
+      payload: {
+        title: "Dinner",
+        paidByMemberId: ana,
+        totalCentavos: 10000,
+        splitMode: "equal",
+        participantIds: [ana],
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
 });
 
 describe("GET /groups/:groupId/expenses", () => {
   it("lists bills, newest first", async () => {
     const { groupId, ana, ben } = await setupGroup();
     const post = (title: string) =>
-      app.inject({
+      inject({
         method: "POST",
         url: `/groups/${groupId}/expenses`,
         payload: {
@@ -219,7 +284,7 @@ describe("GET /groups/:groupId/expenses", () => {
     await post("First");
     await post("Second");
 
-    const res = await app.inject({ method: "GET", url: `/groups/${groupId}/expenses` });
+    const res = await inject({ method: "GET", url: `/groups/${groupId}/expenses` });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().map((e: { title: string }) => e.title)).toEqual(["Second", "First"]);
@@ -232,7 +297,7 @@ describe("items split", () => {
 
     // Pasta 200 (Ana), steak 350 (Ben), pitcher 150 (Ana and Ben), extras 0.
     // Ana: 200 + 75 = 275. Ben: 350 + 75 = 425.
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -253,12 +318,12 @@ describe("items split", () => {
     expect(res.json().shares).toEqual({ [ana]: 27500, [ben]: 42500 });
   });
 
-    it("shares tax and service charge in proportion to each person's food", async () => {
+  it("shares tax and service charge in proportion to each person's food", async () => {
     const { groupId, ana, ben, carl } = await setupGroup();
 
     // Food: Ana 200, Ben 350 (total 550). Extras 55 shared 200:350,
     // so Ana pays 20 of it and Ben pays 35. Totals: Ana 220, Ben 385.
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -284,7 +349,7 @@ describe("items split", () => {
   it("saves the items so they can be read back", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -305,7 +370,7 @@ describe("items split", () => {
   it("answers 422 when items and extras don't add up to the total", async () => {
     const { groupId, ana, ben } = await setupGroup();
 
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -321,8 +386,9 @@ describe("items split", () => {
     expect(res.statusCode).toBe(422);
   });
 });
+
 describe("drafts, claims and confirmation", () => {
-  /** Creates a draft item bill. Items start unclaimed unless you say otherwise. */
+  /** Creates a draft item bill as Carl. Items start unclaimed unless you say otherwise. */
   async function draftItemsBill(
     groupId: string,
     payer: string,
@@ -331,7 +397,7 @@ describe("drafts, claims and confirmation", () => {
     extras = 0,
     extrasMode = "proportional",
   ) {
-    const res = await app.inject({
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses`,
       payload: {
@@ -348,7 +414,7 @@ describe("drafts, claims and confirmation", () => {
   }
 
   async function getBill(groupId: string, expenseId: string) {
-    const res = await app.inject({ method: "GET", url: `/groups/${groupId}/expenses/${expenseId}` });
+    const res = await inject({ method: "GET", url: `/groups/${groupId}/expenses/${expenseId}` });
     return res.json() as {
       status: string;
       items: { id: string; name: string; claimedBy: string[] }[];
@@ -357,11 +423,9 @@ describe("drafts, claims and confirmation", () => {
   }
 
   it("a new bill starts as a draft", async () => {
-    const { groupId, ana, ben, carl } = await setupGroup();
+    const { groupId, carl } = await setupGroup();
     const bill = await draftItemsBill(groupId, carl, [{ name: "Pasta", priceCentavos: 20000 }], 20000);
     expect(bill.status).toBe("draft");
-    expect(ana).toBeDefined();
-    expect(ben).toBeDefined();
   });
 
   it("claiming an item updates everyone's shares", async () => {
@@ -377,19 +441,32 @@ describe("drafts, claims and confirmation", () => {
     );
     const [pasta, steak] = (await getBill(groupId, bill.id)).items;
 
-    await app.inject({
+    await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`, payload: { memberId: ana } },
+      anaCookie,
+    );
+    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000 });
+
+    await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`, payload: { memberId: ben } },
+      benCookie,
+    );
+    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000, [ben]: 35000 });
+  });
+
+  it("you can't claim an item for someone else", async () => {
+    const { groupId, ana, carl } = await setupGroup();
+    const bill = await draftItemsBill(groupId, carl, [{ name: "Pasta", priceCentavos: 20000 }], 20000);
+    const [pasta] = (await getBill(groupId, bill.id)).items;
+
+    // Carl is logged in, but tries to claim the pasta as Ana.
+    const res = await inject({
       method: "POST",
       url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
       payload: { memberId: ana },
     });
-    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000 });
 
-    await app.inject({
-      method: "POST",
-      url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`,
-      payload: { memberId: ben },
-    });
-    expect((await getBill(groupId, bill.id)).shares).toEqual({ [ana]: 20000, [ben]: 35000 });
+    expect(res.statusCode).toBe(403);
   });
 
   it("refuses to confirm while an item has no one claiming it", async () => {
@@ -404,16 +481,27 @@ describe("drafts, claims and confirmation", () => {
       55000,
     );
     const [pasta] = (await getBill(groupId, bill.id)).items;
-    await app.inject({
-      method: "POST",
-      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
-      payload: { memberId: ana },
-    });
+    await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`, payload: { memberId: ana } },
+      anaCookie,
+    );
 
-    const res = await app.inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
+    const res = await inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
 
     expect(res.statusCode).toBe(422);
     expect(res.json().unclaimed).toEqual(["Steak"]);
+  });
+
+  it("only the person who paid can confirm", async () => {
+    const { groupId, carl } = await setupGroup();
+    const bill = await draftItemsBill(groupId, carl, [{ name: "Pasta", priceCentavos: 20000, sharedByMemberIds: [] }], 20000);
+
+    const res = await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` },
+      benCookie,
+    );
+
+    expect(res.statusCode).toBe(403);
   });
 
   it("confirms once everything is claimed, and then refuses changes", async () => {
@@ -428,25 +516,23 @@ describe("drafts, claims and confirmation", () => {
       55000,
     );
     const [pasta, steak] = (await getBill(groupId, bill.id)).items;
-    await app.inject({
-      method: "POST",
-      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`,
-      payload: { memberId: ana },
-    });
-    await app.inject({
-      method: "POST",
-      url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`,
-      payload: { memberId: ben },
-    });
+    await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims`, payload: { memberId: ana } },
+      anaCookie,
+    );
+    await inject(
+      { method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/items/${steak!.id}/claims`, payload: { memberId: ben } },
+      benCookie,
+    );
 
-    const confirm = await app.inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
+    const confirm = await inject({ method: "POST", url: `/groups/${groupId}/expenses/${bill.id}/confirm` });
     expect(confirm.statusCode).toBe(200);
     expect(confirm.json().status).toBe("confirmed");
 
-    const change = await app.inject({
-      method: "DELETE",
-      url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims/${ana}`,
-    });
+    const change = await inject(
+      { method: "DELETE", url: `/groups/${groupId}/expenses/${bill.id}/items/${pasta!.id}/claims/${ana}` },
+      anaCookie,
+    );
     expect(change.statusCode).toBe(409);
   });
 
