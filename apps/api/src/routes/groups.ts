@@ -7,6 +7,8 @@
  *   POST /groups/:groupId/members   add a person to a group
  * RULES: Everything that comes in is checked with zod first. Values reach SQL only
  *        as parameters (${...}), never glued into the query text.
+ * PRIVACY: Account names and numbers are saved, but NOT sent back, because nobody can
+ *        be identified as the payer yet. They come back once login exists (milestone 5).
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -28,8 +30,6 @@ type MemberRow = {
   id: string;
   displayName: string;
   paymentMethod: string | null;
-  accountName: string | null;
-  accountNumber: string | null;
 };
 
 // PostgreSQL error codes we want to turn into friendly answers.
@@ -68,9 +68,7 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
     const members = await sql<MemberRow[]>`
       select id,
              display_name   as "displayName",
-             payment_method as "paymentMethod",
-             account_name   as "accountName",
-             account_number as "accountNumber"
+             payment_method as "paymentMethod"
       from members
       where group_id = ${groupId}
       order by created_at, display_name`;
@@ -94,9 +92,7 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
                 ${m.accountName ?? null}, ${m.accountNumber ?? null})
         returning id,
                   display_name   as "displayName",
-                  payment_method as "paymentMethod",
-                  account_name   as "accountName",
-                  account_number as "accountNumber"`;
+                  payment_method as "paymentMethod"`;
       return reply.code(201).send(member);
     } catch (err) {
       // The database enforces these rules; we just translate its answer.

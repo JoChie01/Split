@@ -11,9 +11,13 @@ import type { Sql } from "./db";
 import { registerGroupRoutes } from "./routes/groups";
 import { registerExpenseRoutes } from "./routes/expenses";
 import { registerLinkRoutes } from "./routes/links";
+import { requestLogSerializer } from "./log";
 
 export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    // When logging is on, hide share-link tokens from the request log.
+    logger: options.logger ? { serializers: { req: requestLogSerializer } } : false,
+  });
   const { sql } = options;
 
   // A simple "is the server alive?" check. The sample proves the API can use @split/core.
