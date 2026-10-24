@@ -12,8 +12,12 @@ import { registerGroupRoutes } from "./routes/groups";
 import { registerExpenseRoutes } from "./routes/expenses";
 import { registerLinkRoutes } from "./routes/links";
 import { requestLogSerializer } from "./log";
+import { registerAuthRoutes } from "./routes/auth";
+import { unconfiguredMailer, type Mailer } from "./mailer";
 
-export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
+export function buildApp(
+  options: { logger?: boolean; sql?: Sql; mailer?: Mailer; appUrl?: string } = {},
+) {
   const app = Fastify({
     // When logging is on, hide share-link tokens from the request log.
     logger: options.logger ? { serializers: { req: requestLogSerializer } } : false,
@@ -39,6 +43,10 @@ export function buildApp(options: { logger?: boolean; sql?: Sql } = {}) {
     registerGroupRoutes(app, sql);
     registerExpenseRoutes(app, sql);
     registerLinkRoutes(app, sql);
+    registerAuthRoutes(app, sql, {
+      mailer: options.mailer ?? unconfiguredMailer,
+      appUrl: options.appUrl ?? "http://localhost:5173",
+    });
   }
 
   return app;

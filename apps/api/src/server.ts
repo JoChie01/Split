@@ -6,6 +6,7 @@
  */
 import { buildApp } from "./app";
 import { createSql } from "./db";
+import { resendMailer } from "./mailer";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "127.0.0.1"; // only your own computer can reach it
@@ -17,7 +18,18 @@ if (!databaseUrl) {
 }
 
 const sql = createSql(databaseUrl);
-const app = buildApp({ logger: true, sql });
+// Email service for login links. Without a key, login links can't be sent (see mailer.ts).
+const resendKey = process.env.RESEND_API_KEY;
+const mailer = resendKey
+  ? resendMailer(resendKey, process.env.MAIL_FROM ?? "Split <onboarding@resend.dev>")
+  : undefined;
+
+const app = buildApp({
+  logger: true,
+  sql,
+  mailer,
+  appUrl: process.env.APP_URL ?? "http://localhost:5173",
+});
 app.addHook("onClose", async () => {
   await sql.end(); // close the database connection when the server stops
 });

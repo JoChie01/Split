@@ -16,6 +16,12 @@ describe("redactUrl", () => {
     expect(redactUrl("/join/SECRETTOKEN123456789012?x=1")).toBe("/join/[redacted]?x=1");
   });
 
+  it("hides the token in a login link query string", () => {
+    expect(redactUrl("/auth/verify?token=SECRETTOKEN123456789012&x=1")).toBe(
+      "/auth/verify?token=[redacted]&x=1",
+    );
+  });
+
   it("leaves other paths alone", () => {
     expect(redactUrl("/groups/123/expenses")).toBe("/groups/123/expenses");
   });
