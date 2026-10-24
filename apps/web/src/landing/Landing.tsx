@@ -56,7 +56,7 @@ export function Landing() {
 
       <a className="cta" href="/login">Start a bill</a>
       <p className="fine">No app to download. Works in your phone&apos;s browser.</p>
-      <p className="foot">Made for the barkada · Manila</p>
+      <p className="foot">Made for the barkada</p>
     </div>
   );
 }
