@@ -43,16 +43,19 @@ describe("database migrations", () => {
       select table_name from information_schema.tables where table_schema = 'public'`;
 
     expect(rows.map((row) => row.table_name).sort()).toEqual([
-     "expense_item_sharers", 
-     "expense_items", 
-     "expense_shares", 
+     "expense_item_sharers",
+     "expense_items",
+     "expense_shares",
      "expenses",
-      "group_links", 
+      "group_links",
       "groups",
-     "members", 
-     "payment_allocations", 
-     "payments", 
-     "schema_migrations"
+     "login_links",
+     "members",
+     "payment_allocations",
+     "payments",
+     "schema_migrations",
+     "sessions",
+     "users"
     ]);
   });
 
