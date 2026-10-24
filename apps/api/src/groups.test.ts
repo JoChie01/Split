@@ -105,12 +105,10 @@ describe("POST /groups/:groupId/members", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({
-      displayName: "Ana",
-      paymentMethod: "GCash",
-      accountName: "Ana Reyes",
-      accountNumber: "09171234567",
-    });
+    expect(res.json()).toMatchObject({ displayName: "Ana", paymentMethod: "GCash" });
+    // Privacy: the account number is saved but never sent back to an unlogged-in caller.
+    expect(res.json()).not.toHaveProperty("accountNumber");
+    expect(res.json()).not.toHaveProperty("accountName");
   });
 
   it("refuses a duplicate name, even in different letters", async () => {

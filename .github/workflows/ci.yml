@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read # the CI job may only read the code, never write to the repo
+
 jobs:
   checks:
     name: Typecheck and tests
