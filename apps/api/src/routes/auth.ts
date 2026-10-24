@@ -100,6 +100,7 @@ export function registerAuthRoutes(app: FastifyInstance, sql: Sql, options: Auth
       insert into users (email) values (${link.email})
       on conflict (email) do update set email = excluded.email
       returning id`;
+    if (!user) throw new Error("could not create the user");
 
     const sessionToken = randomBytes(32).toString("base64url");
     await sql`

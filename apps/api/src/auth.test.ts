@@ -43,9 +43,9 @@ afterAll(async () => {
 /** Asks for a login link and returns the token from the email. */
 async function requestLink(email: string): Promise<string> {
   await app.inject({ method: "POST", url: "/auth/request", payload: { email } });
-  const match = sent.at(-1)?.text.match(/token=([A-Za-z0-9_-]+)/);
-  if (!match) throw new Error("no login link was emailed");
-  return match[1];
+  const token = sent.at(-1)?.text.match(/token=([A-Za-z0-9_-]+)/)?.[1];
+  if (!token) throw new Error("no login link was emailed");
+  return token;
 }
 
 /** Turns a login link into a session cookie value. */
@@ -54,7 +54,9 @@ async function logIn(email: string): Promise<string> {
   const res = await app.inject({ method: "POST", url: "/auth/verify", payload: { token } });
   expect(res.statusCode).toBe(200);
   const cookie = String(res.headers["set-cookie"]);
-  return cookie.split(";")[0]; // "split_session=<value>"
+  const pair = cookie.split(";")[0]; // "split_session=<value>"
+  if (!pair) throw new Error("no session cookie was set");
+  return pair;
 }
 
 describe("POST /auth/request", () => {
@@ -67,8 +69,8 @@ describe("POST /auth/request", () => {
 
     expect(res.statusCode).toBe(202);
     expect(sent).toHaveLength(1);
-    expect(sent[0].to).toBe("ana@example.com"); // trimmed and lowercased
-    expect(sent[0].text).toContain("http://localhost:5173/login/verify?token=");
+    expect(sent[0]?.to).toBe("ana@example.com"); // trimmed and lowercased
+    expect(sent[0]?.text).toContain("http://localhost:5173/login/verify?token=");
   });
 
   it("refuses something that is not an email address", async () => {
@@ -84,8 +86,10 @@ describe("POST /auth/request", () => {
 
   it("stores only a hash of the token, never the token itself", async () => {
     const token = await requestLink("ana@example.com");
-    const [row] = await sql<{ tokenHash: string }[]>`
+    const rows = await sql<{ tokenHash: string }[]>`
       select token_hash as "tokenHash" from login_links`;
+    const row = rows[0];
+    if (!row) throw new Error("no login link was stored");
 
     expect(row.tokenHash).not.toBe(token);
     expect(row.tokenHash).toMatch(/^[0-9a-f]{64}$/); // SHA-256 in hex
