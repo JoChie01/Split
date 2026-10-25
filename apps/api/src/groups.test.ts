@@ -9,7 +9,7 @@ import type { InjectOptions } from "fastify";
 import { buildApp } from "./app";
 import { createSql } from "./db";
 import { runMigrations } from "./migrate";
-import { sessionCookie } from "./test-helpers";
+import { sessionCookie, takeSeat } from "./test-helpers";
 
 const testDatabaseUrl =
   process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/split_test";
@@ -139,6 +139,109 @@ describe("GET /groups/:groupId", () => {
     const res = await as(ana, { method: "GET", url: "/groups/not-an-id" });
 
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("owner view and joined status", () => {
+  it("the owner sees which seats have joined", async () => {
+    const group = await createGroup();
+    const walt = await as(ana, { method: "POST", url: `/groups/${group.id}/members`, payload: { displayName: "Walt" } });
+    await takeSeat(sql, walt.json().id, "ben@example.com");
+
+    const res = await as(ana, { method: "GET", url: `/groups/${group.id}` });
+
+    expect(res.json().isOwner).toBe(true);
+    expect(res.json().members.map((m: { joined: boolean }) => m.joined)).toEqual([true, true]);
+  });
+
+  it("other members don't see the joined status", async () => {
+    const group = await createGroup();
+    const walt = await as(ana, { method: "POST", url: `/groups/${group.id}/members`, payload: { displayName: "Walt" } });
+    await takeSeat(sql, walt.json().id, "ben@example.com");
+
+    const res = await as(ben, { method: "GET", url: `/groups/${group.id}` });
+
+    expect(res.json().isOwner).toBe(false);
+    expect(res.json().members[0]).not.toHaveProperty("joined");
+  });
+});
+
+describe("DELETE /groups/:groupId/members/:memberId", () => {
+  async function addByName(groupId: string, displayName: string, cookie = ana): Promise<string> {
+    const res = await as(cookie, { method: "POST", url: `/groups/${groupId}/members`, payload: { displayName } });
+    return res.json().id as string;
+  }
+
+  it("the owner can remove a seat that hasn't joined and has no bills", async () => {
+    const group = await createGroup();
+    const walt = await addByName(group.id, "Walt");
+
+    const res = await as(ana, { method: "DELETE", url: `/groups/${group.id}/members/${walt}` });
+
+    expect(res.statusCode).toBe(204);
+    const members = await as(ana, { method: "GET", url: `/groups/${group.id}` });
+    expect(members.json().members.map((m: { displayName: string }) => m.displayName)).toEqual(["Ana"]);
+  });
+
+  it("the owner can't remove their own seat", async () => {
+    const group = await createGroup();
+    const details = await as(ana, { method: "GET", url: `/groups/${group.id}` });
+    const anaSeat = details.json().members[0].id as string;
+
+    const res = await as(ana, { method: "DELETE", url: `/groups/${group.id}/members/${anaSeat}` });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("a seat that has joined can't be removed", async () => {
+    const group = await createGroup();
+    const walt = await addByName(group.id, "Walt");
+    await takeSeat(sql, walt, "ben@example.com");
+
+    const res = await as(ana, { method: "DELETE", url: `/groups/${group.id}/members/${walt}` });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("a seat on a bill can't be removed", async () => {
+    const group = await createGroup();
+    const walt = await addByName(group.id, "Walt");
+    const bill = await as(ana, {
+      method: "POST",
+      url: `/groups/${group.id}/expenses`,
+      payload: {
+        title: "Merienda",
+        paidByMemberId: walt,
+        totalCentavos: 10000,
+        splitMode: "equal",
+        participantIds: [walt],
+      },
+    });
+    expect(bill.statusCode).toBe(201);
+
+    const res = await as(ana, { method: "DELETE", url: `/groups/${group.id}/members/${walt}` });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("only the owner can remove seats", async () => {
+    const group = await createGroup();
+    const walt = await addByName(group.id, "Walt");
+    const benSeat = await addByName(group.id, "Ben");
+    await takeSeat(sql, benSeat, "ben@example.com");
+
+    const res = await as(ben, { method: "DELETE", url: `/groups/${group.id}/members/${walt}` });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("someone who isn't a member gets 404", async () => {
+    const group = await createGroup();
+    const walt = await addByName(group.id, "Walt");
+
+    const res = await as(ben, { method: "DELETE", url: `/groups/${group.id}/members/${walt}` });
+
+    expect(res.statusCode).toBe(404);
   });
 });
 
