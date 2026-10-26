@@ -6,50 +6,137 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError } from "./api";
+import "./signin.css";
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function SignIn() {
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [limited, setLimited] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function send(address: string) {
     setBusy(true);
-    setError(null);
+    setErrorText(null);
     try {
-      const res = await api<{ message: string }>("POST", "/auth/request", { email });
-      setMessage(res.message);
+      await api("POST", "/auth/request", { email: address });
+      setSentTo(address);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not send the link. Try again.");
+      if (err instanceof ApiError && err.status === 400) {
+        setFieldError(err.message);
+      } else if (err instanceof ApiError && err.status === 429) {
+        setLimited(true);
+        setErrorText(err.message);
+      } else {
+        setErrorText(err instanceof ApiError ? err.message : "Could not send the link. Try again.");
+      }
     } finally {
       setBusy(false);
     }
   }
 
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const address = email.trim();
+    if (!EMAIL_SHAPE.test(address)) {
+      setFieldError("Enter an email address, like you@example.com.");
+      return;
+    }
+    setFieldError(null);
+    send(address);
+  }
+
+  if (sentTo) {
+    return (
+      <main className="signin">
+        <div className="signin-card">
+          <Brand />
+          <h1>Check your email</h1>
+          <div className="signin-notice" role="status">
+            <div>
+              <strong>Link sent to</strong>
+              <span className="signin-addr">{sentTo}</span>
+            </div>
+          </div>
+          <p className="signin-lead">Open the link on this phone. It works once and expires in 15 minutes.</p>
+          <p className="signin-hint">Nothing in your inbox? Check spam, or wait a minute before asking for another.</p>
+          <div className="signin-row">
+            <button type="button" className="signin-link" disabled={busy} onClick={() => send(sentTo)}>
+              Send it again
+            </button>
+            <button
+              type="button"
+              className="signin-link"
+              onClick={() => {
+                setSentTo(null);
+                setEmail(sentTo);
+              }}
+            >
+              Use a different email
+            </button>
+          </div>
+          {errorText && <p className="signin-error" role="alert">{errorText}</p>}
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="app-page">
-      <h1>Log in to Split</h1>
-      {message ? (
-        <p className="app-note">{message}</p>
-      ) : (
-        <form onSubmit={submit} className="app-stack">
+    <main className="signin">
+      <div className="signin-card">
+        <Brand />
+        <h1>Log in</h1>
+        {errorText && <div className="signin-error-box" role="alert">{errorText}</div>}
+        <p className="signin-lead">No password. We email you a link that works once.</p>
+        <form onSubmit={submit} noValidate>
           <label htmlFor="email">Email address</label>
           <input
             id="email"
             type="email"
             autoComplete="email"
-            required
+            inputMode="email"
+            placeholder="you@example.com"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            aria-invalid={fieldError !== null}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setFieldError(null);
+            }}
           />
-          <button type="submit" disabled={busy}>
-            {busy ? "Sending..." : "Send me a login link"}
+          {fieldError && <p className="signin-field-error">{fieldError}</p>}
+          <button type="submit" className="signin-primary" disabled={busy || limited}>
+            {busy ? "Sending..." : "Email me a link"}
           </button>
-          {error && <p className="app-error" role="alert">{error}</p>}
         </form>
-      )}
+        <p className="signin-hint">Use the email your group knows you by. Links expire in 15 minutes.</p>
+        {limited && (
+          <div className="signin-row">
+            <button
+              type="button"
+              className="signin-link"
+              onClick={() => {
+                setLimited(false);
+                setErrorText(null);
+              }}
+            >
+              Back to the start
+            </button>
+          </div>
+        )}
+      </div>
     </main>
+  );
+}
+
+function Brand() {
+  return (
+    <div className="signin-brand">
+      <span className="signin-mark" aria-hidden="true">S</span>
+      <span>Split</span>
+    </div>
   );
 }
 
@@ -70,12 +157,15 @@ export function Verify() {
       });
   }, []);
 
-  if (!error) return <main className="app-page"><p>Logging you in...</p></main>;
+  if (!error) return <main className="signin"><p className="signin-lead">Logging you in...</p></main>;
   return (
-    <main className="app-page">
-      <h1>Link not working</h1>
-      <p className="app-error" role="alert">{error}</p>
-      <p><a href="/login">Ask for a new link</a></p>
+    <main className="signin">
+      <div className="signin-card">
+        <Brand />
+        <h1>Link not working</h1>
+        <p className="signin-error" role="alert">{error}</p>
+        <p><a href="/login" className="signin-link">Ask for a new link</a></p>
+      </div>
     </main>
   );
 }
