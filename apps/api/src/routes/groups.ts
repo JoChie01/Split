@@ -12,7 +12,7 @@
  *        Only members of a group can see or change it. Others get "not found".
  *        The owner (whoever created the group) can also remove seats. A seat can be
  *        removed only if its person hasn't joined and isn't on any bill or payment.
- * PRIVACY: Account names and numbers are saved, but NOT sent back to anyone.
+ * PRIVACY: Account names and numbers are not accepted or stored. Only the payment method's name is kept.
  *          Only the owner sees which seats have joined.
  */
 import type { FastifyInstance } from "fastify";
@@ -31,11 +31,10 @@ const newGroup = z.object({
 
 const memberParams = groupParams.extend({ memberId: z.string().uuid() });
 
+// Only the payment method's name is kept. Account names and numbers are not accepted or stored.
 const newMember = z.object({
   displayName: z.string().trim().min(1).max(60),
   paymentMethod: z.string().trim().min(1).max(40).optional(),
-  accountName: z.string().trim().min(1).max(100).optional(),
-  accountNumber: z.string().trim().min(1).max(60).optional(),
 });
 
 type GroupRow = { id: string; name: string; createdAt: Date };
@@ -180,9 +179,8 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
 
     try {
       const [member] = await sql<MemberRow[]>`
-        insert into members (group_id, display_name, payment_method, account_name, account_number)
-        values (${groupId}, ${m.displayName}, ${m.paymentMethod ?? null},
-                ${m.accountName ?? null}, ${m.accountNumber ?? null})
+        insert into members (group_id, display_name, payment_method)
+        values (${groupId}, ${m.displayName}, ${m.paymentMethod ?? null})
         returning id,
                   display_name   as "displayName",
                   payment_method as "paymentMethod",
