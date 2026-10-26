@@ -22,7 +22,7 @@ export function Landing() {
         Split the bill, <mark>not the friendship.</mark>
       </h1>
       <p className="lead">
-        Everyone taps what they ordered. The service charge is shared fairly. Nobody chases anyone for ₱47.
+        Everyone taps what they ordered and sees their own share. Nobody chases anyone for ₱47.
       </p>
 
       <Receipt />
@@ -34,28 +34,28 @@ export function Landing() {
             <span className="num">1</span>
             <div>
               <strong>Add the bill</strong>
-              <span className="desc">Type it in, or snap the receipt.</span>
+              <span className="desc">Type in the items, prices and who paid.</span>
             </div>
           </li>
           <li>
             <span className="num">2</span>
             <div>
               <strong>Everyone taps their own</strong>
-              <span className="desc">Each person sees their total change live.</span>
+              <span className="desc">Each person claims what they ordered and sees their share.</span>
             </div>
           </li>
           <li>
             <span className="num">3</span>
             <div>
-              <strong>Confirm, then pay</strong>
-              <span className="desc">Nothing moves until the payer locks it in.</span>
+              <strong>Pay, then prove it</strong>
+              <span className="desc">Send the money yourself, enter the reference number, and attach a receipt. The payer confirms when it arrives.</span>
             </div>
           </li>
         </ol>
       </section>
 
       <a className="cta" href="/login">Start a bill</a>
-      <p className="fine">No app to download. Works in your phone&apos;s browser.</p>
+      <p className="fine">No app to download. Works in your phone&apos;s browser. Receipts are deleted 3 days after the payer confirms.</p>
       <p className="foot">Made for the barkada</p>
     </div>
   );
