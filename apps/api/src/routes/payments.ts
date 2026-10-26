@@ -19,6 +19,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { Sql } from "../db";
 import { accessIn } from "../access";
+import { recordEvent } from "../audit";
 
 const PROOF_MAX_BYTES = 2 * 1024 * 1024;
 const UNIQUE_VIOLATION = "23505";
@@ -109,6 +110,7 @@ export function registerPaymentRoutes(app: FastifyInstance, sql: Sql) {
         }
         return row!;
       });
+      await recordEvent(sql, groupId, "payment_recorded", who.memberId, payment.id);
       return reply.code(201).send({ id: payment.id, status: "pending" });
     } catch (err) {
       if (pgCode(err) === UNIQUE_VIOLATION) {
@@ -190,6 +192,13 @@ export function registerPaymentRoutes(app: FastifyInstance, sql: Sql) {
     if (!updated) {
       return reply.code(409).send({ error: "This payment isn't waiting for an answer right now" });
     }
+    await recordEvent(
+      sql,
+      groupId,
+      to === "confirmed" ? "payment_confirmed" : "payment_disputed",
+      who.memberId,
+      paymentId,
+    );
     return { id: paymentId, status: to };
   }
 
@@ -230,6 +239,7 @@ export function registerPaymentRoutes(app: FastifyInstance, sql: Sql) {
     if (!updated) {
       return reply.code(409).send({ error: "Proof is only needed after the receiver disputes this payment" });
     }
+    await recordEvent(sql, groupId, "proof_attached", who.memberId, paymentId);
     return { id: paymentId, status: "pending" };
   });
 

@@ -19,6 +19,7 @@ import { z } from "zod";
 import type { Sql } from "../db";
 import { accessIn } from "../access";
 import { createRateLimiter } from "../rate-limit";
+import { recordEvent } from "../audit";
 import { currentUser } from "./auth";
 
 const LINK_HOURS = 48;
@@ -94,6 +95,7 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
         error: `The group already has ${result.count} people. Set the limit to at least that.`,
       });
     }
+    await recordEvent(sql, groupId, "link_created", who.memberId);
     return reply.code(201).send({
       token,
       expiresAt: result.expiresAt,
@@ -113,6 +115,7 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
     if (!who.isOwner) return reply.code(403).send({ error: "Only the group's owner can cancel invite links" });
 
     const removed = await sql`delete from group_links where group_id = ${groupId} returning token_hash`;
+    await recordEvent(sql, groupId, "link_cancelled", who.memberId);
     return { revoked: removed.length };
   });
 
@@ -167,6 +170,7 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
           where id = ${body.data.memberId} and group_id = ${groupId} and user_id is null
           returning id`;
         if (!taken) return reply.code(409).send({ error: "That name is already taken" });
+        await recordEvent(sql, groupId, "member_joined", taken.id);
       } else {
         const displayName = body.data.displayName;
         // Count and insert under a lock on the group, so two people can't both take the last spot.
@@ -178,12 +182,14 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
           const count = counted?.count ?? 0;
           if (g?.seatLimit == null || count >= g.seatLimit) return false;
 
-          await tx`
+          const [newSeat] = await tx<{ id: string }[]>`
             insert into members (group_id, display_name, user_id)
-            values (${groupId}, ${displayName}, ${user.id})`;
-          return true;
+            values (${groupId}, ${displayName}, ${user.id})
+            returning id`;
+          return newSeat ? { memberId: newSeat.id } : false;
         });
         if (!room) return reply.code(409).send({ error: "This group is full" });
+        await recordEvent(sql, groupId, "member_joined", room.memberId);
       }
     } catch (err) {
       if (pgCode(err) === UNIQUE_VIOLATION) {
