@@ -11,6 +11,7 @@ import type { Sql } from "./db";
 import { registerGroupRoutes } from "./routes/groups";
 import { registerExpenseRoutes } from "./routes/expenses";
 import { registerLinkRoutes } from "./routes/links";
+import { registerPaymentRoutes } from "./routes/payments";
 import { requestLogSerializer } from "./log";
 import { registerAuthRoutes } from "./routes/auth";
 import { unconfiguredMailer, type Mailer } from "./mailer";
@@ -43,6 +44,7 @@ export function buildApp(
     registerGroupRoutes(app, sql);
     registerExpenseRoutes(app, sql);
     registerLinkRoutes(app, sql);
+    registerPaymentRoutes(app, sql);
     registerAuthRoutes(app, sql, {
       mailer: options.mailer ?? unconfiguredMailer,
       appUrl: options.appUrl ?? "http://localhost:5173",
