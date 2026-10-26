@@ -246,7 +246,7 @@ describe("DELETE /groups/:groupId/members/:memberId", () => {
 });
 
 describe("POST /groups/:groupId/members", () => {
-  it("adds a member with payment details, and does not send the account details back", async () => {
+  it("adds a member with a payment method, and ignores any account details sent with it", async () => {
     const group = await createGroup();
 
     const res = await as(ana, {
@@ -264,6 +264,16 @@ describe("POST /groups/:groupId/members", () => {
     expect(res.json()).toMatchObject({ displayName: "Ben", paymentMethod: "GCash" });
     expect(res.json()).not.toHaveProperty("accountNumber");
     expect(res.json()).not.toHaveProperty("accountName");
+  });
+
+  it("the database no longer has columns for account details", async () => {
+    const rows = await sql<{ column_name: string }[]>`
+      select column_name from information_schema.columns
+      where table_schema = 'public' and table_name = 'members'`;
+
+    const columns = rows.map((r) => r.column_name);
+    expect(columns).not.toContain("account_number");
+    expect(columns).not.toContain("account_name");
   });
 
   it("refuses a duplicate name, even in different letters", async () => {
