@@ -114,7 +114,16 @@ describe("recording a payment", () => {
     const { groupId, carl, ana } = await makeGroup();
 
     const list = await as(danCookie, { method: "GET", url: `/groups/${groupId}/payments` });
-    const record = await anaPaysCarl(groupId, carl, ana, "GC-ZZZZ9999");
+    const record = await as(danCookie, {
+      method: "POST",
+      url: `/groups/${groupId}/payments`,
+      payload: {
+        toMemberId: carl,
+        mode: "reimburse",
+        reference: "GC-ZZZZ9999",
+        allocations: [{ debtorMemberId: ana, amountCentavos: 25000 }],
+      },
+    });
 
     expect(list.statusCode).toBe(404);
     expect(record.statusCode).toBe(404);
