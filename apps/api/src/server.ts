@@ -7,6 +7,7 @@
 import { buildApp } from "./app";
 import { createSql } from "./db";
 import { resendMailer } from "./mailer";
+import { purgeExpiredReceipts } from "./receipts";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "127.0.0.1"; // only your own computer can reach it
@@ -30,7 +31,13 @@ const app = buildApp({
   mailer,
   appUrl: process.env.APP_URL ?? "http://localhost:5173",
 });
+// Delete receipts of confirmed payments after 3 days. Checked once an hour.
+const receiptTimer = setInterval(() => {
+  purgeExpiredReceipts(sql).catch((err) => app.log.error(err));
+}, 60 * 60 * 1000);
+
 app.addHook("onClose", async () => {
+  clearInterval(receiptTimer);
   await sql.end(); // close the database connection when the server stops
 });
 
