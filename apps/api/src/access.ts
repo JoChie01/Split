@@ -12,17 +12,19 @@ import type { Sql } from "./db";
 import { currentUser } from "./routes/auth";
 
 export type Access =
-  | { ok: true; memberId: string; userId: string }
+  | { ok: true; memberId: string; userId: string; isOwner: boolean }
   | { ok: false; code: 401 | 404; error: string };
 
 export async function accessIn(sql: Sql, request: FastifyRequest, groupId: string): Promise<Access> {
   const user = await currentUser(sql, request);
   if (!user) return { ok: false, code: 401, error: "Log in first" };
 
-  const [row] = await sql<{ memberId: string }[]>`
-    select id as "memberId" from members
-    where group_id = ${groupId} and user_id = ${user.id}`;
+  const [row] = await sql<{ memberId: string; isOwner: boolean }[]>`
+    select m.id as "memberId",
+           coalesce(g.owner_user_id = m.user_id, false) as "isOwner"
+    from members m join groups g on g.id = m.group_id
+    where m.group_id = ${groupId} and m.user_id = ${user.id}`;
   if (!row) return { ok: false, code: 404, error: "Group not found" };
 
-  return { ok: true, memberId: row.memberId, userId: user.id };
+  return { ok: true, memberId: row.memberId, userId: user.id, isOwner: row.isOwner };
 }

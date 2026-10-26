@@ -6,10 +6,14 @@
  *   GET  /me/groups                 the groups you belong to
  *   GET  /groups/:groupId           a group with its members (members only)
  *   POST /groups/:groupId/members   add a person by name (members only)
+ *   DELETE /groups/:groupId/members/:memberId   remove a seat (owner only)
  * RULES: Everything that comes in is checked with zod first. Values reach SQL only
  *        as parameters (${...}), never glued into the query text.
  *        Only members of a group can see or change it. Others get "not found".
+ *        The owner (whoever created the group) can also remove seats. A seat can be
+ *        removed only if its person hasn't joined and isn't on any bill or payment.
  * PRIVACY: Account names and numbers are saved, but NOT sent back to anyone.
+ *          Only the owner sees which seats have joined.
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -24,6 +28,8 @@ const newGroup = z.object({
   yourName: z.string().trim().min(1).max(60),
 });
 
+const memberParams = groupParams.extend({ memberId: z.string().uuid() });
+
 const newMember = z.object({
   displayName: z.string().trim().min(1).max(60),
   paymentMethod: z.string().trim().min(1).max(40).optional(),
@@ -32,6 +38,7 @@ const newMember = z.object({
 });
 
 type GroupRow = { id: string; name: string; createdAt: Date };
+type GroupDetailRow = GroupRow & { seatLimit: number | null };
 type MemberRow = {
   id: string;
   displayName: string;
@@ -63,7 +70,7 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
     // The group and its first member are saved together, or not at all.
     const group = await sql.begin(async (tx) => {
       const [row] = await tx<GroupRow[]>`
-        insert into groups (name) values (${body.data.name})
+        insert into groups (name, owner_user_id) values (${body.data.name}, ${user.id})
         returning id, name, created_at as "createdAt"`;
       await tx`
         insert into members (group_id, display_name, user_id)
@@ -92,18 +99,67 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
     const who = await accessIn(sql, request, groupId);
     if (!who.ok) return reply.code(who.code).send({ error: who.error });
 
-    const [group] = await sql<GroupRow[]>`
-      select id, name, created_at as "createdAt" from groups where id = ${groupId}`;
+    const [group] = await sql<GroupDetailRow[]>`
+      select id, name, created_at as "createdAt", seat_limit as "seatLimit"
+      from groups where id = ${groupId}`;
 
-    const members = await sql<MemberRow[]>`
+    const rows = await sql<(MemberRow & { joined: boolean })[]>`
       select id,
              display_name   as "displayName",
              payment_method as "paymentMethod",
-             (id = ${who.memberId}) as "isYou"
+             (id = ${who.memberId}) as "isYou",
+             (user_id is not null)  as "joined"
       from members
       where group_id = ${groupId}
       order by created_at, display_name`;
-    return { ...group, members };
+
+    // Only the owner sees who has joined. Everyone else sees the list of names.
+    const members = rows.map(({ joined, ...m }) => (who.isOwner ? { ...m, joined } : m));
+    return { ...group, isOwner: who.isOwner, members };
+  });
+
+  app.delete("/groups/:groupId/members/:memberId", async (request, reply) => {
+    const params = memberParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "Invalid id" });
+    const { groupId, memberId } = params.data;
+
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+    if (!who.isOwner) return reply.code(403).send({ error: "Only the group's owner can remove seats" });
+    if (memberId === who.memberId) return reply.code(409).send({ error: "You can't remove your own seat" });
+
+    // Check and delete in one transaction. The row lock stops someone joining in between.
+    const outcome = await sql.begin(async (tx) => {
+      const [target] = await tx<{ joined: boolean }[]>`
+        select (user_id is not null) as joined from members
+        where id = ${memberId} and group_id = ${groupId}
+        for update`;
+      if (!target) return "missing" as const;
+      if (target.joined) return "joined" as const;
+
+      const [used] = await tx<{ used: boolean }[]>`
+        select exists (
+          select 1 from expenses where paid_by_member_id = ${memberId}
+          union all select 1 from expense_shares where member_id = ${memberId}
+          union all select 1 from expense_item_sharers where member_id = ${memberId}
+          union all select 1 from payments
+            where from_member_id = ${memberId} or to_member_id = ${memberId}
+          union all select 1 from payment_allocations where debtor_member_id = ${memberId}
+        ) as used`;
+      if (used?.used) return "used" as const;
+
+      await tx`delete from members where id = ${memberId}`;
+      return "removed" as const;
+    });
+
+    if (outcome === "missing") return reply.code(404).send({ error: "Seat not found" });
+    if (outcome === "joined") {
+      return reply.code(409).send({ error: "They've joined, so this seat can't be removed" });
+    }
+    if (outcome === "used") {
+      return reply.code(409).send({ error: "They're on a bill or payment, so this seat can't be removed" });
+    }
+    return reply.code(204).send();
   });
 
   app.post("/groups/:groupId/members", async (request, reply) => {

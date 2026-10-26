@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
 import { buildApp } from "./app";
 import { createSql, type Sql } from "./db";
-import { sessionCookie } from "./test-helpers";
+import { sessionCookie, takeSeat } from "./test-helpers";
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/split_test";
 
@@ -65,8 +65,12 @@ describe("shareable links", () => {
     return { groupId, carl: ids.Carl!, ana: ids.Ana!, ben: ids.Ben! };
   }
 
-  async function makeLink(groupId: string): Promise<string> {
-    const res = await as(carlCookie, { method: "POST", url: `/groups/${groupId}/links` });
+  async function makeLink(groupId: string, seatLimit = 5): Promise<string> {
+    const res = await as(carlCookie, {
+      method: "POST",
+      url: `/groups/${groupId}/links`,
+      payload: { seatLimit },
+    });
     expect(res.statusCode).toBe(201);
     return res.json().token as string;
   }
@@ -216,9 +220,63 @@ describe("shareable links", () => {
   it("only members can make a link", async () => {
     const { groupId } = await makeGroup();
 
-    const res = await as(danCookie, { method: "POST", url: `/groups/${groupId}/links` });
+    const res = await as(danCookie, { method: "POST", url: `/groups/${groupId}/links`, payload: { seatLimit: 5 } });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  it("only the owner can make a link, even if you're a member", async () => {
+    const { groupId, ben } = await makeGroup();
+    await takeSeat(sql, ben, "ben@example.com");
+
+    const res = await as(benCookie, { method: "POST", url: `/groups/${groupId}/links`, payload: { seatLimit: 5 } });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("a link needs a seat limit", async () => {
+    const { groupId } = await makeGroup();
+
+    const res = await as(carlCookie, { method: "POST", url: `/groups/${groupId}/links`, payload: {} });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("the seat limit can't be lower than the people already in the group", async () => {
+    const { groupId } = await makeGroup(); // three people
+
+    const res = await as(carlCookie, { method: "POST", url: `/groups/${groupId}/links`, payload: { seatLimit: 2 } });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("a new person can't join once the group is full", async () => {
+    const { groupId } = await makeGroup(); // three people
+    const token = await makeLink(groupId, 3);
+
+    const res = await as(danCookie, { method: "POST", url: `/join/${token}/join`, payload: { displayName: "Dan" } });
+
+    expect(res.statusCode).toBe(409);
+    const group = await as(carlCookie, { method: "GET", url: `/groups/${groupId}` });
+    expect(group.json().members).toHaveLength(3);
+  });
+
+  it("taking an existing free seat still works when the group is full", async () => {
+    const { groupId, ben } = await makeGroup();
+    const token = await makeLink(groupId, 3);
+
+    const res = await as(benCookie, { method: "POST", url: `/join/${token}/join`, payload: { memberId: ben } });
+
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("the join page shows the seat limit", async () => {
+    const { groupId } = await makeGroup();
+    const token = await makeLink(groupId, 4);
+
+    const res = await as(benCookie, { method: "GET", url: `/join/${token}` });
+
+    expect(res.json().group.seatLimit).toBe(4);
   });
 
   it("a link can't be made for a group that doesn't exist", async () => {

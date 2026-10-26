@@ -2,13 +2,14 @@
  * routes/links.ts
  *
  * WHAT: Shareable links that let a person join a group.
- *   POST /groups/:groupId/links     make a link (members only, lasts 7 days)
+ *   POST /groups/:groupId/links     make a link (owner only, lasts 7 days, sets the seat limit)
  *   GET  /join/:token               the group and its seats (you must be logged in)
  *   POST /join/:token/join          take a seat, or add yourself as a new member (logged in)
  * RULES: A link only lets someone JOIN. Joining means logging in and then choosing a seat
  *        that no one has taken yet, or adding yourself. After that, you use the normal
  *        group routes, which check your membership. Claims and confirmations never happen
  *        through a link.
+ *        Adding yourself as a new person is refused once the group reaches its seat limit.
  *        Payment details are never shown on the join page.
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -22,6 +23,7 @@ const LINK_DAYS = 7;
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 const tokenParams = z.object({ token: z.string().min(20).max(100) });
+const linkBody = z.object({ seatLimit: z.number().int().min(2).max(50) });
 const joinBody = z.union([
   z.object({ memberId: z.string().uuid() }),
   z.object({ displayName: z.string().trim().min(1).max(60) }),
@@ -57,16 +59,40 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
 
     const who = await accessIn(sql, request, groupId);
     if (!who.ok) return reply.code(who.code).send({ error: who.error });
+    if (!who.isOwner) return reply.code(403).send({ error: "Only the group's owner can invite people" });
+
+    const body = linkBody.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: "Say how many people the group has room for (2 to 50)" });
+    }
+    const { seatLimit } = body.data;
 
     const token = randomBytes(32).toString("base64url");
-    const [row] = await sql<{ expiresAt: Date }[]>`
-      insert into group_links (token_hash, group_id, expires_at)
-      values (${hashToken(token)}, ${groupId}, now() + make_interval(days => ${LINK_DAYS}))
-      returning expires_at as "expiresAt"`;
+    // Setting the limit and making the link happen together, under a lock on the group.
+    const result = await sql.begin(async (tx) => {
+      await tx`select id from groups where id = ${groupId} for update`;
+      const [counted] = await tx<{ count: number }[]>`
+        select count(*)::int as count from members where group_id = ${groupId}`;
+      const count = counted?.count ?? 0;
+      if (seatLimit < count) return { ok: false as const, count };
 
+      await tx`update groups set seat_limit = ${seatLimit} where id = ${groupId}`;
+      const [row] = await tx<{ expiresAt: Date }[]>`
+        insert into group_links (token_hash, group_id, expires_at)
+        values (${hashToken(token)}, ${groupId}, now() + make_interval(days => ${LINK_DAYS}))
+        returning expires_at as "expiresAt"`;
+      return { ok: true as const, expiresAt: row!.expiresAt };
+    });
+
+    if (!result.ok) {
+      return reply.code(409).send({
+        error: `The group already has ${result.count} people. Set the limit to at least that.`,
+      });
+    }
     return reply.code(201).send({
       token,
-      expiresAt: row!.expiresAt,
+      expiresAt: result.expiresAt,
+      seatLimit,
       note: "Share this link now. It can't be shown again.",
     });
   });
@@ -81,8 +107,8 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
     const groupId = await groupForToken(sql, params.data.token);
     if (!groupId) return reply.code(404).send({ error: "Link not found or expired" });
 
-    const [group] = await sql<{ id: string; name: string }[]>`
-      select id, name from groups where id = ${groupId}`;
+    const [group] = await sql<{ id: string; name: string; seatLimit: number | null }[]>`
+      select id, name, seat_limit as "seatLimit" from groups where id = ${groupId}`;
     // Each seat shows only whether it's taken, never who holds it.
     const seats = await sql<{ id: string; displayName: string; taken: boolean }[]>`
       select id, display_name as "displayName", (user_id is not null) as taken
@@ -121,9 +147,22 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
           returning id`;
         if (!taken) return reply.code(409).send({ error: "That name is already taken" });
       } else {
-        await sql`
-          insert into members (group_id, display_name, user_id)
-          values (${groupId}, ${body.data.displayName}, ${user.id})`;
+        const displayName = body.data.displayName;
+        // Count and insert under a lock on the group, so two people can't both take the last spot.
+        const room = await sql.begin(async (tx) => {
+          const [g] = await tx<{ seatLimit: number | null }[]>`
+            select seat_limit as "seatLimit" from groups where id = ${groupId} for update`;
+          const [counted] = await tx<{ count: number }[]>`
+            select count(*)::int as count from members where group_id = ${groupId}`;
+          const count = counted?.count ?? 0;
+          if (g?.seatLimit == null || count >= g.seatLimit) return false;
+
+          await tx`
+            insert into members (group_id, display_name, user_id)
+            values (${groupId}, ${displayName}, ${user.id})`;
+          return true;
+        });
+        if (!room) return reply.code(409).send({ error: "This group is full" });
       }
     } catch (err) {
       if (pgCode(err) === UNIQUE_VIOLATION) {
