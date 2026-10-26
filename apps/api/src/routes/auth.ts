@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { Sql } from "../db";
 import type { Mailer } from "../mailer";
+import { createRateLimiter } from "../rate-limit";
 import { hashToken } from "./links";
 
 export const SESSION_COOKIE = "split_session";
@@ -61,10 +62,18 @@ function sessionCookie(value: string, maxAgeSeconds: number): string {
 }
 
 export function registerAuthRoutes(app: FastifyInstance, sql: Sql, options: AuthOptions) {
+  // Login emails: up to 10 requests per IP and 3 per address in 15 minutes.
+  const byIp = createRateLimiter({ max: 10, windowMs: 15 * 60_000 });
+  const byEmail = createRateLimiter({ max: 3, windowMs: 15 * 60_000 });
+
   app.post("/auth/request", async (request, reply) => {
     const body = requestBody.safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "Enter a valid email address" });
     const email = body.data.email;
+
+    if (!byIp.allow(request.ip) || !byEmail.allow(email)) {
+      return reply.code(429).send({ error: "Too many login links requested. Try again in a few minutes." });
+    }
 
     const token = randomBytes(32).toString("base64url");
     await sql`

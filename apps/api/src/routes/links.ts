@@ -2,7 +2,8 @@
  * routes/links.ts
  *
  * WHAT: Shareable links that let a person join a group.
- *   POST /groups/:groupId/links     make a link (owner only, lasts 7 days, sets the seat limit)
+ *   POST /groups/:groupId/links     make a link (owner only, lasts 48 hours, sets the seat limit)
+ *   DELETE /groups/:groupId/links   cancel all of the group's links (owner only)
  *   GET  /join/:token               the group and its seats (you must be logged in)
  *   POST /join/:token/join          take a seat, or add yourself as a new member (logged in)
  * RULES: A link only lets someone JOIN. Joining means logging in and then choosing a seat
@@ -17,9 +18,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Sql } from "../db";
 import { accessIn } from "../access";
+import { createRateLimiter } from "../rate-limit";
 import { currentUser } from "./auth";
 
-const LINK_DAYS = 7;
+const LINK_HOURS = 48;
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 const tokenParams = z.object({ token: z.string().min(20).max(100) });
@@ -52,6 +54,9 @@ async function groupForToken(sql: Sql, token: string): Promise<string | undefine
 }
 
 export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
+  // Join pages: up to 60 requests per IP per minute. Enough for real use, too few to brute-force tokens.
+  const joinByIp = createRateLimiter({ max: 60, windowMs: 60_000 });
+
   app.post("/groups/:groupId/links", async (request, reply) => {
     const params = groupParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "Invalid group id" });
@@ -79,7 +84,7 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
       await tx`update groups set seat_limit = ${seatLimit} where id = ${groupId}`;
       const [row] = await tx<{ expiresAt: Date }[]>`
         insert into group_links (token_hash, group_id, expires_at)
-        values (${hashToken(token)}, ${groupId}, now() + make_interval(days => ${LINK_DAYS}))
+        values (${hashToken(token)}, ${groupId}, now() + make_interval(hours => ${LINK_HOURS}))
         returning expires_at as "expiresAt"`;
       return { ok: true as const, expiresAt: row!.expiresAt };
     });
@@ -97,7 +102,22 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
     });
   });
 
+  // Cancel every invite link for a group at once. Only the owner can do this.
+  app.delete("/groups/:groupId/links", async (request, reply) => {
+    const params = groupParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "Invalid group id" });
+    const { groupId } = params.data;
+
+    const who = await accessIn(sql, request, groupId);
+    if (!who.ok) return reply.code(who.code).send({ error: who.error });
+    if (!who.isOwner) return reply.code(403).send({ error: "Only the group's owner can cancel invite links" });
+
+    const removed = await sql`delete from group_links where group_id = ${groupId} returning token_hash`;
+    return { revoked: removed.length };
+  });
+
   app.get("/join/:token", async (request, reply) => {
+    if (!joinByIp.allow(request.ip)) return reply.code(429).send({ error: "Slow down and try again in a minute" });
     const params = tokenParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "Link not found or expired" });
 
@@ -122,6 +142,7 @@ export function registerLinkRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   app.post("/join/:token/join", async (request, reply) => {
+    if (!joinByIp.allow(request.ip)) return reply.code(429).send({ error: "Slow down and try again in a minute" });
     const params = tokenParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "Link not found or expired" });
 
