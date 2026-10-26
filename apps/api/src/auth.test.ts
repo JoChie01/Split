@@ -18,6 +18,7 @@ const sql = createSql(testDatabaseUrl);
 // Every email the app "sends" is kept here instead of going out.
 let sent: { to: string; text: string }[] = [];
 const app = buildApp({
+  rateLimit: false, // these tests request many login links on purpose; the limit has its own tests
   sql,
   appUrl: "http://localhost:5173",
   mailer: async (to, _subject, text) => {

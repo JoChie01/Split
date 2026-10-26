@@ -17,7 +17,8 @@ import { registerAuthRoutes } from "./routes/auth";
 import { unconfiguredMailer, type Mailer } from "./mailer";
 
 export function buildApp(
-  options: { logger?: boolean; sql?: Sql; mailer?: Mailer; appUrl?: string } = {},
+  // rateLimit: false turns off the login-email limit. Only tests that send many requests use it.
+  options: { logger?: boolean; sql?: Sql; mailer?: Mailer; appUrl?: string; rateLimit?: boolean } = {},
 ) {
   const app = Fastify({
     // When logging is on, hide share-link tokens from the request log.
@@ -61,6 +62,7 @@ export function buildApp(
     registerAuthRoutes(app, sql, {
       mailer: options.mailer ?? unconfiguredMailer,
       appUrl: options.appUrl ?? "http://localhost:5173",
+      rateLimit: options.rateLimit ?? true,
     });
   }
 

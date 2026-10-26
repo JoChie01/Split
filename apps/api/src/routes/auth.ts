@@ -29,7 +29,7 @@ const requestBody = z.object({
 });
 const verifyBody = z.object({ token: z.string().min(20).max(100) });
 
-export type AuthOptions = { mailer: Mailer; appUrl: string };
+export type AuthOptions = { mailer: Mailer; appUrl: string; rateLimit?: boolean };
 
 export type CurrentUser = { id: string; email: string };
 
@@ -71,7 +71,7 @@ export function registerAuthRoutes(app: FastifyInstance, sql: Sql, options: Auth
     if (!body.success) return reply.code(400).send({ error: "Enter a valid email address" });
     const email = body.data.email;
 
-    if (!byIp.allow(request.ip) || !byEmail.allow(email)) {
+    if (options.rateLimit !== false && (!byIp.allow(request.ip) || !byEmail.allow(email))) {
       return reply.code(429).send({ error: "Too many login links requested. Try again in a few minutes." });
     }
 
