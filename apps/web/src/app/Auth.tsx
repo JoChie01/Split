@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError } from "./api";
 import "./signin.css";
+import { Mark, Wordmark } from "../brand/Logo";
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -51,8 +52,8 @@ export function SignIn() {
 
   if (sentTo) {
     return (
-      <main className="signin">
-        <div className="signin-card">
+      <main className="page">
+        <div className="signin-body">
           <Brand />
           <h1>Check your email</h1>
           <div className="signin-notice" role="status">
@@ -85,8 +86,8 @@ export function SignIn() {
   }
 
   return (
-    <main className="signin">
-      <div className="signin-card">
+    <main className="page">
+      <div className="signin-body">
         <Brand />
         <h1>Log in</h1>
         {errorText && <div className="signin-error-box" role="alert">{errorText}</div>}
@@ -131,12 +132,15 @@ export function SignIn() {
   );
 }
 
+// The same header as the landing page, so the two pages look like one app.
 function Brand() {
   return (
-    <div className="signin-brand">
-      <span className="signin-mark" aria-hidden="true">S</span>
-      <span>Split</span>
-    </div>
+    <header className="top">
+      <a className="logo" href="/" aria-label="Split home">
+        <Mark />
+        <Wordmark />
+      </a>
+    </header>
   );
 }
 
@@ -157,10 +161,10 @@ export function Verify() {
       });
   }, []);
 
-  if (!error) return <main className="signin"><p className="signin-lead">Logging you in...</p></main>;
+  if (!error) return <main className="page"><p className="signin-lead">Logging you in...</p></main>;
   return (
-    <main className="signin">
-      <div className="signin-card">
+    <main className="page">
+      <div className="signin-body">
         <Brand />
         <h1>Link not working</h1>
         <p className="signin-error" role="alert">{error}</p>
