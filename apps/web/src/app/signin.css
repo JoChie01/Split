@@ -14,7 +14,8 @@
 .signin-body label {
   display: block; font-weight: 600; font-size: 15px; margin: 28px 0 8px;
 }
-.signin-body input[type="email"] {
+.signin-body input[type="email"],
+.signin-body input[type="text"] {
   display: block; width: 100%; min-width: 0; min-height: 52px;
   font: 500 16px Inter, system-ui, sans-serif; color: var(--fg); background: var(--card);
   border: 1.5px solid var(--rule); border-radius: 12px; padding: 0 14px;
@@ -56,6 +57,17 @@
 }
 .signin-link:disabled { color: var(--muted); text-decoration: none; cursor: default; }
 a.signin-link { display: inline-flex; align-items: center; }
+
+.signin-body input[type="text"]::placeholder { color: var(--muted); opacity: 0.7; }
+.signin-body input[type="text"]:focus { outline: 3px solid var(--hi-bg); outline-offset: 2px; }
+
+/* The privacy checkbox sits beside its text, not above it like the other labels. */
+.signin-body .signin-consent {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 24px 0 0; font-weight: 400; font-size: 15px;
+}
+.signin-check { width: 22px; height: 22px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--btn-bg); }
+.signin-consent small { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
 
 /* Error red for text on the cream and near-black backgrounds. */
 :root { --err: #B42318; }

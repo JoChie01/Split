@@ -113,6 +113,9 @@ export function SignIn() {
           </button>
         </form>
         <p className="signin-hint">Use the email your group knows you by. Links expire in 15 minutes.</p>
+        <p className="signin-hint">
+          New to Split? <a href="/signup" className="signin-link">Create an account</a>
+        </p>
         {limited && (
           <div className="signin-row">
             <button
@@ -128,6 +131,132 @@ export function SignIn() {
           </div>
         )}
       </div>
+    </main>
+  );
+}
+
+/**
+ * Create an account: a name, an email address, and agreement to the privacy notice.
+ * The email link then works the same way as for logging in.
+ */
+export function SignUp() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [agreed, setAgreed] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [consentError, setConsentError] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const who = name.trim();
+    const address = email.trim();
+    const nameOk = who.length > 0;
+    const emailOk = EMAIL_SHAPE.test(address);
+    setNameError(nameOk ? null : "Enter your name, so your group knows who you are.");
+    setEmailError(emailOk ? null : "Enter an email address, like you@example.com.");
+    setConsentError(agreed ? null : "Tick the box to agree to the privacy notice before creating your account.");
+    if (!nameOk || !emailOk || !agreed) return;
+
+    setBusy(true);
+    setErrorText(null);
+    try {
+      await api("POST", "/auth/request", { email: address, name: who, privacy: true });
+      setSentTo(address);
+    } catch (err) {
+      setErrorText(err instanceof ApiError ? err.message : "Could not send the link. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (sentTo) {
+    return (
+      <main className="page">
+        <Brand />
+        <h1>Check your <mark>email</mark></h1>
+        <div className="signin-notice" role="status">
+          <strong>Link sent to</strong>
+          <span className="signin-addr">{sentTo}</span>
+        </div>
+        <p className="signin-lead">Open the link on this phone to finish creating your account. It works once and expires in 15 minutes.</p>
+        <div className="signin-row">
+          <button type="button" className="signin-link" onClick={() => setSentTo(null)}>
+            Use a different email
+          </button>
+        </div>
+        {errorText && <p className="signin-error" role="alert">{errorText}</p>}
+      </main>
+    );
+  }
+
+  return (
+    <main className="page">
+      <Brand />
+      <h1>Make an <mark>account</mark></h1>
+      <p className="signin-lead">Your name is how your group sees you. No password: we email you a link to log in.</p>
+      <form onSubmit={submit} noValidate className="signin-body">
+        {errorText && <div className="signin-error-box" role="alert">{errorText}</div>}
+
+        <label htmlFor="name">Your name</label>
+        <input
+          id="name"
+          type="text"
+          autoComplete="name"
+          placeholder="Ana Reyes"
+          value={name}
+          aria-invalid={nameError !== null}
+          onChange={(e) => {
+            setName(e.target.value);
+            setNameError(null);
+          }}
+        />
+        {nameError && <p className="signin-field-error">{nameError}</p>}
+
+        <label htmlFor="email">Email address</label>
+        <input
+          id="email"
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          placeholder="you@example.com"
+          value={email}
+          aria-invalid={emailError !== null}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setEmailError(null);
+          }}
+        />
+        {emailError && <p className="signin-field-error">{emailError}</p>}
+
+        <label className="signin-consent">
+          <input
+            type="checkbox"
+            className="signin-check"
+            checked={agreed}
+            aria-invalid={consentError !== null}
+            onChange={(e) => {
+              setAgreed(e.target.checked);
+              setConsentError(null);
+            }}
+          />
+          <span>
+            I agree to the privacy notice.
+            <small>Split uses your name and email only to share bills with your group.</small>
+          </span>
+        </label>
+        {consentError && <p className="signin-field-error">{consentError}</p>}
+
+        <button type="submit" className="signin-primary" disabled={busy}>
+          {busy ? "Sending..." : "Create my account"}
+        </button>
+      </form>
+      <p className="signin-hint">
+        Already have an account? <a href="/login" className="signin-link">Log in</a>
+      </p>
     </main>
   );
 }

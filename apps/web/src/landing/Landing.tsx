@@ -54,7 +54,7 @@ export function Landing() {
         </ol>
       </section>
 
-      <a className="cta" href="/login">Start a bill</a>
+      <a className="cta" href="/signup">Start a bill</a>
       <p className="fine">No app to download. Works in your phone&apos;s browser. Receipts are deleted 3 days after the payer confirms.</p>
       <p className="foot">Made for the barkada</p>
     </div>
