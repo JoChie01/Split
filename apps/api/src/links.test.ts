@@ -279,6 +279,37 @@ describe("shareable links", () => {
     expect(res.json().group.seatLimit).toBe(4);
   });
 
+  it("a new link lasts 48 hours", async () => {
+    const { groupId } = await makeGroup();
+
+    const res = await as(carlCookie, { method: "POST", url: `/groups/${groupId}/links`, payload: { seatLimit: 5 } });
+
+    const hours = (new Date(res.json().expiresAt).getTime() - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(47);
+    expect(hours).toBeLessThan(49);
+  });
+
+  it("the owner can cancel all links, and they stop working at once", async () => {
+    const { groupId } = await makeGroup();
+    const token = await makeLink(groupId);
+
+    const res = await as(carlCookie, { method: "DELETE", url: `/groups/${groupId}/links` });
+    const after = await as(benCookie, { method: "GET", url: `/join/${token}` });
+
+    expect(res.json()).toEqual({ revoked: 1 });
+    expect(after.statusCode).toBe(404);
+  });
+
+  it("only the owner can cancel links", async () => {
+    const { groupId, ben } = await makeGroup();
+    await takeSeat(sql, ben, "ben@example.com");
+    await makeLink(groupId);
+
+    const res = await as(benCookie, { method: "DELETE", url: `/groups/${groupId}/links` });
+
+    expect(res.statusCode).toBe(403);
+  });
+
   it("a link can't be made for a group that doesn't exist", async () => {
     const res = await as(carlCookie, {
       method: "POST",
