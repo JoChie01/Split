@@ -20,6 +20,7 @@ import { z } from "zod";
 import type { Sql } from "../db";
 import { accessIn } from "../access";
 import { currentUser } from "./auth";
+import { recordEvent } from "../audit";
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 
@@ -159,6 +160,7 @@ export function registerGroupRoutes(app: FastifyInstance, sql: Sql) {
     if (outcome === "used") {
       return reply.code(409).send({ error: "They're on a bill or payment, so this seat can't be removed" });
     }
+    await recordEvent(sql, groupId, "member_removed", who.memberId, memberId);
     return reply.code(204).send();
   });
 

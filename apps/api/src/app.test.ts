@@ -32,21 +32,13 @@ describe("GET /health", () => {
 });
 
 describe("GET /health/db", () => {
-  it("answers 503 when no database is configured", async () => {
-    const app = buildApp();
-    const res = await app.inject({ method: "GET", url: "/health/db" });
-
-    expect(res.statusCode).toBe(503);
-    await app.close();
-  });
-
-  it("answers ok when the database is reachable", async () => {
+  // It used to tell anyone whether the database was up. It's gone from the public API now.
+  it("is no longer public", async () => {
     const sql = createSql(testDatabaseUrl);
     const app = buildApp({ sql });
     const res = await app.inject({ method: "GET", url: "/health/db" });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ status: "ok" });
+    expect(res.statusCode).toBe(404);
     await app.close();
     await sql.end();
   });

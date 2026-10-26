@@ -23,6 +23,7 @@ import {
 } from "@split/core";
 import type { Sql } from "../db";
 import { accessIn } from "../access";
+import { recordEvent } from "../audit";
 
 const groupParams = z.object({ groupId: z.string().uuid() });
 const expenseParams = groupParams.extend({ expenseId: z.string().uuid() });
@@ -473,6 +474,7 @@ export function registerExpenseRoutes(app: FastifyInstance, sql: Sql) {
     }
 
     await sql`update expenses set status = 'confirmed' where id = ${expenseId}`;
+    await recordEvent(sql, groupId, "bill_confirmed", who.memberId, expenseId);
     return { status: "confirmed", shares: await storedShares(sql, expenseId) };
   });
 }
