@@ -43,6 +43,7 @@ describe("database migrations", () => {
       select table_name from information_schema.tables where table_schema = 'public'`;
 
     expect(rows.map((row) => row.table_name).sort()).toEqual([
+     "audit_events",
      "expense_item_sharers",
      "expense_items",
      "expense_shares",
