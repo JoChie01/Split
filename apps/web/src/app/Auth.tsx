@@ -1,17 +1,23 @@
 /**
  * Auth.tsx
  *
- * WHAT: The two login screens. SignIn asks for an email address and sends a link.
+ * WHAT: The sign-up, log-in and link screens. Log in asks for an email address and sends a link.
+ *       If this device remembers an email, log in offers to send a link to it.
  *       Verify opens when the person taps that link and logs them in.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError } from "./api";
+import { rememberEmail, rememberedEmail } from "./remember";
 import "./signin.css";
 import { Mark, Wordmark } from "../brand/Logo";
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function SignIn() {
+  // The address used last on this device, if any. It is read once, when the page opens.
+  const [remembered] = useState<string | null>(() => rememberedEmail());
+  // True when the person chose "Use a different email", so the form shows instead.
+  const [typingNew, setTypingNew] = useState(false);
   const [email, setEmail] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -24,6 +30,7 @@ export function SignIn() {
     setErrorText(null);
     try {
       await api("POST", "/auth/request", { email: address });
+      rememberEmail(address);
       setSentTo(address);
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
@@ -73,6 +80,7 @@ export function SignIn() {
               className="signin-link"
               onClick={() => {
                 setSentTo(null);
+                setTypingNew(true);
                 setEmail(sentTo);
               }}
             >
@@ -80,6 +88,50 @@ export function SignIn() {
             </button>
           </div>
           {errorText && <p className="signin-error" role="alert">{errorText}</p>}
+        </div>
+      </main>
+    );
+  }
+
+  // This device remembers an address: offer to send the link there.
+  if (remembered && !typingNew) {
+    return (
+      <main className="page">
+        <div className="signin-body">
+          <Brand />
+          <h1>Welcome <mark>back</mark></h1>
+          <p className="signin-lead">Send a login link to the email you used before?</p>
+          <div className="signin-notice" role="status">
+            <div>
+              <strong>Email</strong>
+              <span className="signin-addr">{remembered}</span>
+            </div>
+          </div>
+          {errorText && <div className="signin-error-box" role="alert">{errorText}</div>}
+          <button
+            type="button"
+            className="signin-primary"
+            disabled={busy || limited}
+            onClick={() => send(remembered)}
+          >
+            {busy ? "Sending..." : "Send me a login link"}
+          </button>
+          <div className="signin-row">
+            <button
+              type="button"
+              className="signin-link"
+              onClick={() => {
+                setTypingNew(true);
+                setEmail("");
+                setErrorText(null);
+              }}
+            >
+              Use a different email
+            </button>
+          </div>
+          <p className="signin-hint">
+            New to Split? <a href="/signup" className="signin-link">Create an account</a>
+          </p>
         </div>
       </main>
     );
@@ -165,6 +217,7 @@ export function SignUp() {
     setErrorText(null);
     try {
       await api("POST", "/auth/request", { email: address, name: who, privacy: true });
+      rememberEmail(address);
       setSentTo(address);
     } catch (err) {
       setErrorText(err instanceof ApiError ? err.message : "Could not send the link. Try again.");
