@@ -68,6 +68,12 @@ a.signin-link { display: inline-flex; align-items: center; }
 }
 .signin-check { width: 22px; height: 22px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--btn-bg); }
 .signin-consent small { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
+/* The privacy notice link sits inside the sentence. It must not use the tall button-style link,
+   or it stretches the first line and pushes the text below the checkbox. */
+.signin-consent a {
+  display: inline; min-height: 0; color: var(--fg); font-weight: 600;
+  text-decoration: underline; text-underline-offset: 3px;
+}
 
 /* Error red for text on the cream and near-black backgrounds. */
 :root { --err: #B42318; }

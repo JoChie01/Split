@@ -298,7 +298,7 @@ export function SignUp() {
           />
           <span>
             I have read and agree to the{" "}
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="signin-link">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">
               privacy notice
             </a>
             .
