@@ -28,13 +28,13 @@ Split only keeps records. It does not move money: people pay each other through 
 
 - Web screens: create a group, show the invite link, add bills, record a payment, join a group.
 - Show the account name when someone joins a group.
-- Automatic deletion of old payment records.
+- Automatic deletion of old payment records (receipts are already cleaned up automatically).
 - Send email from a verified domain.
 - Hosting, backups and an owner audit view.
 
 ## Privacy
 
-Split stores names, emails and payment receipts. The retention rules are still being finalized, and the cleanup job is not built yet.
+Split stores names, emails, payment records and payment receipts. Receipts of confirmed payments are deleted automatically a few days after confirmation. The rest of the retention rules are still being finalized.
 
 ## Run it locally
 
