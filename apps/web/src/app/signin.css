@@ -1,0 +1,77 @@
+/*
+ * signin.css
+ *
+ * WHAT: Styles for the sign-in and link screens.
+ * LOOK: The same as the landing page. Colours come from styles.css (the shared tokens),
+ *       the header and headline come from the landing page's own classes (.page, .top, h1).
+ */
+
+.signin-body { margin-top: 8px; }
+
+.signin-lead { font-size: 17px; color: var(--muted); margin: 16px 0 0; text-wrap: pretty; }
+.signin-hint { font-size: 13px; color: var(--muted); margin: 12px 0 0; text-wrap: pretty; }
+
+.signin-body label {
+  display: block; font-weight: 600; font-size: 15px; margin: 28px 0 8px;
+}
+.signin-body input[type="email"],
+.signin-body input[type="text"] {
+  display: block; width: 100%; min-width: 0; min-height: 52px;
+  font: 500 16px Inter, system-ui, sans-serif; color: var(--fg); background: var(--card);
+  border: 1.5px solid var(--rule); border-radius: 12px; padding: 0 14px;
+}
+.signin-body input[type="email"]::placeholder { color: var(--muted); opacity: 0.7; }
+.signin-body input[type="email"]:focus { outline: 3px solid var(--hi-bg); outline-offset: 2px; }
+.signin-body input[aria-invalid="true"] { border-color: var(--err); }
+
+.signin-field-error { color: var(--err); font-size: 14px; margin: 8px 0 0; font-weight: 600; }
+
+.signin-primary {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 56px; margin-top: 20px;
+  border: 0; border-radius: 14px; cursor: pointer;
+  background: var(--btn-bg); color: var(--btn-fg);
+  font: 600 17px Inter, system-ui, sans-serif;
+}
+.signin-primary:disabled { opacity: 0.5; cursor: default; }
+
+.signin-notice {
+  margin-top: 28px; padding: 16px 18px;
+  background: var(--card); border: 1px solid var(--rule); border-radius: 16px;
+}
+.signin-notice strong { display: block; font-size: 13px; color: var(--muted); font-weight: 500; }
+.signin-addr { font-weight: 600; font-size: 17px; word-break: break-word; }
+
+.signin-error-box {
+  margin-top: 24px; padding: 14px 16px;
+  background: var(--hi-bg); color: var(--hi-fg);
+  border-radius: 14px; font-weight: 600;
+}
+.signin-error { color: var(--err); font-weight: 600; margin: 16px 0 0; }
+
+.signin-row { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 20px; font-size: 15px; }
+.signin-link {
+  min-height: 44px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--fg); font: 600 15px Inter, system-ui, sans-serif;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.signin-link:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+a.signin-link { display: inline-flex; align-items: center; }
+
+.signin-body input[type="text"]::placeholder { color: var(--muted); opacity: 0.7; }
+.signin-body input[type="text"]:focus { outline: 3px solid var(--hi-bg); outline-offset: 2px; }
+
+/* The privacy checkbox sits beside its text, not above it like the other labels. */
+.signin-body .signin-consent {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 24px 0 0; font-weight: 400; font-size: 15px;
+}
+.signin-check { width: 22px; height: 22px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--btn-bg); }
+.signin-consent small { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+/* Error red for text on the cream and near-black backgrounds. */
+:root { --err: #B42318; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --err: #FF8A80; }
+}
+:root[data-theme="dark"] { --err: #FF8A80; }

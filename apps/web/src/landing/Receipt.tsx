@@ -5,12 +5,9 @@
  * LEARN FROM IT:
  *   - useState holds which items are claimed. Changing it redraws the component.
  *   - Money is in centavos (integers). formatPeso from @split/core turns them into pesos for display.
- *   - The fee rule here is simplified (a flat 10%). The real rule lives in @split/core.
  */
 import { useState } from "react";
 import { formatPeso } from "@split/core";
-
-const SERVICE_PERCENT = 10;
 
 const ITEMS = [
   { id: "sisig", name: "Sisig", priceCentavos: 28000 },
@@ -32,7 +29,6 @@ export function Receipt() {
   }
 
   const mine = ITEMS.filter((item) => claimed.has(item.id)).reduce((sum, item) => sum + item.priceCentavos, 0);
-  const fee = Math.round((mine * SERVICE_PERCENT) / 100);
 
   return (
     <section className="receipt" aria-label="Try it: tap what you ordered">
@@ -60,19 +56,11 @@ export function Receipt() {
         );
       })}
       <hr />
-      <div className="sum">
-        <span>Your food</span>
-        <span>{formatPeso(mine)}</span>
-      </div>
-      <div className="sum">
-        <span>Service charge ({SERVICE_PERCENT}%)</span>
-        <span>{formatPeso(fee)}</span>
-      </div>
       <div className="you-pay">
-        <span className="label">You pay</span>
-        <span className="amount">{formatPeso(mine + fee)}</span>
+        <span className="label">Your share</span>
+        <span className="amount">{formatPeso(mine)}</span>
       </div>
-      <p className="hint">Tap the items you ordered. Your total updates as you go.</p>
+      <p className="hint">Tap the items you ordered. Your share updates as you go.</p>
     </section>
   );
 }

@@ -26,6 +26,9 @@ const SESSION_DAYS = 30;
 
 const requestBody = z.object({
   email: z.string().trim().toLowerCase().max(254).pipe(z.email()),
+  // Sign-up only: the name the group will see, and agreement to the privacy notice.
+  name: z.string().trim().max(60).optional(),
+  privacy: z.boolean().optional(),
 });
 const verifyBody = z.object({ token: z.string().min(20).max(100) });
 
@@ -69,16 +72,25 @@ export function registerAuthRoutes(app: FastifyInstance, sql: Sql, options: Auth
   app.post("/auth/request", async (request, reply) => {
     const body = requestBody.safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "Enter a valid email address" });
-    const email = body.data.email;
+    const { email, name, privacy } = body.data;
+
+    // Signing up needs a name and agreement to the privacy notice. Logging in needs neither.
+    if (name !== undefined) {
+      if (name === "") return reply.code(400).send({ error: "Enter your name, so your group knows who you are." });
+      if (!privacy) return reply.code(400).send({ error: "Agree to the privacy notice to create your account." });
+    }
 
     if (options.rateLimit !== false && (!byIp.allow(request.ip) || !byEmail.allow(email))) {
       return reply.code(429).send({ error: "Too many login links requested. Try again in a few minutes." });
     }
 
     const token = randomBytes(32).toString("base64url");
+    // The time of agreement is recorded only when a name was given, i.e. when signing up.
+    const consentAt = name !== undefined ? new Date() : null;
     await sql`
-      insert into login_links (token_hash, email, expires_at)
-      values (${hashToken(token)}, ${email}, now() + make_interval(mins => ${LINK_MINUTES}))`;
+      insert into login_links (token_hash, email, expires_at, name, privacy_accepted_at)
+      values (${hashToken(token)}, ${email}, now() + make_interval(mins => ${LINK_MINUTES}),
+              ${name ?? null}, ${consentAt})`;
 
     const link = `${options.appUrl}/login/verify?token=${token}`;
     await options.mailer(
@@ -98,16 +110,20 @@ export function registerAuthRoutes(app: FastifyInstance, sql: Sql, options: Auth
 
     // One statement marks the link as used only if it is unused and not expired.
     // Two people clicking at the same moment can't both win.
-    const [link] = await sql<{ email: string }[]>`
+    const [link] = await sql<{ email: string; name: string | null; privacyAcceptedAt: Date | null }[]>`
       update login_links set used_at = now()
       where token_hash = ${hashToken(body.data.token)}
         and used_at is null and expires_at > now()
-      returning email`;
+      returning email, name, privacy_accepted_at as "privacyAcceptedAt"`;
     if (!link) return reply.code(400).send({ error: "This link has expired or was already used" });
 
+    // Keep a name and consent that are already on the account. Fill them in only if they are missing.
     const [user] = await sql<{ id: string }[]>`
-      insert into users (email) values (${link.email})
-      on conflict (email) do update set email = excluded.email
+      insert into users (email, name, privacy_accepted_at)
+      values (${link.email}, ${link.name}, ${link.privacyAcceptedAt})
+      on conflict (email) do update set
+        name = coalesce(users.name, excluded.name),
+        privacy_accepted_at = coalesce(users.privacy_accepted_at, excluded.privacy_accepted_at)
       returning id`;
     if (!user) throw new Error("could not create the user");
 

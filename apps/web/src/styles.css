@@ -7,6 +7,8 @@
  *   Setting data-theme="dark" or data-theme="light" on <html> overrides that.
  */
 
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+
 :root {
   --bg: #F5EFE3;
   --fg: #111111;

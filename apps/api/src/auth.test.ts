@@ -141,6 +141,47 @@ describe("POST /auth/verify", () => {
   });
 });
 
+describe("sign up", () => {
+  it("saves the name and the time the privacy notice was accepted", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/auth/request",
+      payload: { email: "ana@example.com", name: "Ana Reyes", privacy: true },
+    });
+    const token = sent.at(-1)?.text.match(/token=([A-Za-z0-9_-]+)/)?.[1];
+    expect(token).toBeTruthy();
+
+    const res = await app.inject({ method: "POST", url: "/auth/verify", payload: { token } });
+
+    expect(res.statusCode).toBe(200);
+    const [row] = await sql<{ name: string; accepted: boolean }[]>`
+      select name, privacy_accepted_at is not null as accepted from users where email = 'ana@example.com'`;
+    expect(row).toEqual({ name: "Ana Reyes", accepted: true });
+  });
+
+  it("refuses to sign up without agreeing to the privacy notice, and sends no email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/request",
+      payload: { email: "ana@example.com", name: "Ana Reyes" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("refuses an empty name, and sends no email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/request",
+      payload: { email: "ana@example.com", name: "   ", privacy: true },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+});
+
 describe("GET /me, logout", () => {
   it("answers 401 when nobody is logged in", async () => {
     const res = await app.inject({ method: "GET", url: "/me" });
