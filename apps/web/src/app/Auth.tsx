@@ -297,8 +297,15 @@ export function SignUp() {
             }}
           />
           <span>
-            I agree to the privacy notice.
-            <small>Split uses your name and email only to share bills with your group.</small>
+            I have read and agree to the{" "}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="signin-link">
+              privacy notice
+            </a>
+            .
+            <small>
+              Your name and email are used to run your account and share bills with your group. The
+              notice opens in a new tab.
+            </small>
           </span>
         </label>
         {consentError && <p className="signin-field-error">{consentError}</p>}
@@ -315,7 +322,7 @@ export function SignUp() {
 }
 
 // The same header as the landing page, so the two pages look like one app.
-function Brand() {
+export function Brand() {
   return (
     <header className="top">
       <a className="logo" href="/" aria-label="Split home">

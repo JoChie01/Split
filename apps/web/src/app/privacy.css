@@ -1,0 +1,17 @@
+/* The privacy notice page (/privacy). Uses the same colours as the rest of the app. */
+.privacy h2 {
+  font-family: Outfit, Inter, sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.25;
+  margin: 32px 0 8px;
+  text-wrap: balance;
+}
+.privacy p,
+.privacy li { font-size: 16px; line-height: 1.6; }
+.privacy p { margin: 0 0 12px; }
+.privacy ul { margin: 0 0 12px; padding-left: 20px; }
+.privacy li { margin-bottom: 6px; }
+.privacy a { color: var(--fg); text-underline-offset: 3px; }
+.privacy-meta { color: var(--muted); font-size: 14px; margin: 0 0 8px; }
+.privacy-back { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--rule); }
